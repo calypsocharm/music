@@ -42,6 +42,7 @@ const allowedExt = (name) => {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
 const grantCookie = (res) => res.setHeader('Set-Cookie',
   `radio=${TOKEN}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`);
@@ -117,8 +118,15 @@ app.post('/api/passcode', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/media', express.static(MEDIA_DIR)); // supports Range requests for seeking
 
-// --- track list, newest first ---
+// --- her saved song order lives with the music ---
+const ORDER_FILE = path.join(MEDIA_DIR, '.order.json');
+const loadOrder = () => {
+  try { return JSON.parse(fs.readFileSync(ORDER_FILE, 'utf8')); } catch { return []; }
+};
+
+// --- track list: her saved order; brand-new uploads float to the top ---
 app.get('/api/tracks', (req, res) => {
+  const rank = new Map(loadOrder().map((n, i) => [n, i]));
   const files = fs.readdirSync(MEDIA_DIR)
     .filter(allowedExt)
     .map((name) => {
@@ -133,8 +141,23 @@ app.get('/api/tracks', (req, res) => {
         kind: VIDEO_EXT.has(ext) ? 'video' : 'audio',
       };
     })
-    .sort((a, b) => b.mtime - a.mtime);
+    .sort((a, b) => {
+      const ra = rank.has(a.name) ? rank.get(a.name) : null;
+      const rb = rank.has(b.name) ? rank.get(b.name) : null;
+      if (ra === null && rb === null) return b.mtime - a.mtime;
+      if (ra === null) return -1;
+      if (rb === null) return 1;
+      return ra - rb;
+    });
   res.json(files);
+});
+
+// --- save a new song order ---
+app.post('/api/order', (req, res) => {
+  if (!Array.isArray(req.body)) return res.status(400).json({ error: 'expected a list' });
+  const names = req.body.map((n) => path.basename(String(n))).filter(allowedExt);
+  fs.writeFileSync(ORDER_FILE, JSON.stringify(names));
+  res.json({ ok: true, count: names.length });
 });
 
 // --- upload (multiple files) ---

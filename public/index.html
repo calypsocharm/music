@@ -59,6 +59,12 @@
     cursor: pointer; user-select: none;
   }
   .track.playing { background: var(--card-hi); outline: 2px solid var(--accent2); }
+  .track.dragging { opacity: .65; outline: 2px dashed var(--accent); }
+  .track .handle {
+    flex: none; background: none; border: 0; color: var(--dim); font-size: 1.15rem;
+    padding: 10px 6px 10px 2px; cursor: grab; touch-action: none;
+  }
+  .track .handle:active { cursor: grabbing; color: var(--accent); }
   .track .art {
     width: 42px; height: 42px; flex: none; border-radius: 10px; display: grid; place-items: center;
     background: linear-gradient(135deg, #5b3a8c, #8c3a6e); font-size: 1.2rem;
@@ -184,6 +190,7 @@ let queue = [];         // play order (indexes into tracks)
 let qPos = -1;          // position in queue
 let shuffle = false;
 let repeatAll = true;   // loop the whole library by default — good for walks
+let currentName = null; // filename of what's playing, survives list reloads
 
 const fmtTime = (s) => {
   if (!isFinite(s)) return '0:00';
@@ -197,6 +204,11 @@ async function loadTracks() {
   tracks = await res.json();
   renderList();
   rebuildQueue();
+  if (currentName) {
+    const i = tracks.findIndex((t) => t.name === currentName);
+    qPos = i >= 0 ? queue.indexOf(i) : -1;
+    highlightPlaying();
+  }
 }
 
 function renderList() {
@@ -215,15 +227,17 @@ function renderList() {
     row.className = 'track';
     row.dataset.index = i;
     row.innerHTML =
+      '<button class="handle" title="Hold and drag to reorder">☰</button>' +
       '<div class="art">' + (t.kind === 'video' ? '🎬' : '🎵') + '</div>' +
       '<div class="info"><div class="title"></div>' +
       '<div class="meta">' + t.kind + ' · ' + fmtSize(t.size) + '</div></div>' +
       '<button class="del" title="Delete">🗑</button>';
     row.querySelector('.title').textContent = t.title;
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.del')) return;
+      if (e.target.closest('.del') || e.target.closest('.handle')) return;
       playTrack(i);
     });
+    wireReorder(row.querySelector('.handle'), row);
     row.querySelector('.del').addEventListener('click', async () => {
       if (!confirm('Delete "' + t.title + '" forever?')) return;
       await fetch('/api/tracks/' + encodeURIComponent(t.name), { method: 'DELETE' });
@@ -253,6 +267,45 @@ function highlightPlaying() {
   });
 }
 
+// --- hold ☰ and slide a song up or down; the order is saved to the station ---
+function wireReorder(handle, row) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    row.classList.add('dragging');
+    const move = (ev) => {
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const other = under && under.closest ? under.closest('.track') : null;
+      if (other && other !== row) {
+        const r = other.getBoundingClientRect();
+        const before = ev.clientY < r.top + r.height / 2;
+        other.parentNode.insertBefore(row, before ? other : other.nextSibling);
+      }
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      row.classList.remove('dragging');
+      saveOrder();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+}
+
+async function saveOrder() {
+  const names = [...document.querySelectorAll('.track')]
+    .map((el) => tracks[Number(el.dataset.index)].name);
+  await fetch('/api/order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(names),
+  });
+  loadTracks();
+}
+
 function playTrack(index) {
   qPos = queue.indexOf(index);
   startCurrent();
@@ -261,6 +314,7 @@ function playTrack(index) {
 function startCurrent() {
   if (qPos < 0 || qPos >= queue.length) return;
   const t = tracks[queue[qPos]];
+  currentName = t.name;
   video.pause();
   audio.pause();
   if (t.kind === 'video') {
