@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#1a1025">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/icon-512.png">
 <title>Calypso Radio</title>
 <style>
   :root {
@@ -399,6 +402,9 @@ document.addEventListener('drop', (e) => {
 });
 
 loadTracks();
+
+// installable-app support
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // show the station passcode, with a way to pick your own
 function showPin(pin) {

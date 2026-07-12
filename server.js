@@ -85,7 +85,10 @@ app.post('/login', (req, res) => {
 });
 
 // --- auth: ?token= link, year-long cookie, or the /login form above ---
+// (app-install files are public: phones fetch them without the login cookie)
+const PUBLIC_FILES = new Set(['/manifest.webmanifest', '/sw.js', '/icon-512.png']);
 app.use((req, res, next) => {
+  if (PUBLIC_FILES.has(req.path)) return next();
   const fromQuery = req.query.token;
   const cookieMatch = (req.headers.cookie || '').match(/(?:^|;\s*)radio=([^;]+)/);
   const fromCookie = cookieMatch ? cookieMatch[1] : null;
