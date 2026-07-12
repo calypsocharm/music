@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1025">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Calypso Radio</title>
+<style>
+  :root {
+    --bg: #1a1025;
+    --bg2: #241536;
+    --card: #2d1b44;
+    --card-hi: #3a2458;
+    --text: #f3ecff;
+    --dim: #a894c9;
+    --accent: #f0a35e;
+    --accent2: #e05c9c;
+    --player-h: 148px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%);
+    min-height: 100vh;
+    color: var(--text);
+  }
+  header {
+    padding: max(env(safe-area-inset-top), 16px) 18px 6px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  h1 { font-size: 1.45rem; margin: 0; letter-spacing: .3px; }
+  h1 .star { color: var(--accent); }
+  .sub { color: var(--dim); font-size: .82rem; margin: 2px 18px 10px; }
+
+  .upload-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #2a1020; font-weight: 700; border: 0; border-radius: 999px;
+    padding: 10px 18px; font-size: .95rem; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(224, 92, 156, .35);
+  }
+  .upload-btn:active { transform: scale(.96); }
+  #progressWrap {
+    display: none; margin: 4px 18px 10px; background: var(--card);
+    border-radius: 999px; overflow: hidden; height: 10px;
+  }
+  #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .15s; }
+  #progressText { display: none; color: var(--dim); font-size: .8rem; margin: 0 18px 8px; }
+
+  #list { padding: 4px 12px calc(var(--player-h) + 30px); }
+  .track {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--card); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+    cursor: pointer; user-select: none;
+  }
+  .track.playing { background: var(--card-hi); outline: 2px solid var(--accent2); }
+  .track .art {
+    width: 42px; height: 42px; flex: none; border-radius: 10px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #5b3a8c, #8c3a6e); font-size: 1.2rem;
+  }
+  .track .info { flex: 1; min-width: 0; }
+  .track .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track .meta { color: var(--dim); font-size: .78rem; margin-top: 2px; }
+  .track .del {
+    flex: none; background: none; border: 0; color: var(--dim); font-size: 1.1rem;
+    padding: 8px; cursor: pointer; border-radius: 8px;
+  }
+  .track .del:active { color: var(--accent2); }
+  #empty { text-align: center; color: var(--dim); padding: 60px 30px; line-height: 1.6; }
+  #empty .big { font-size: 2.4rem; }
+
+  /* bottom player */
+  #player {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(26, 16, 37, .96); backdrop-filter: blur(14px);
+    border-top: 1px solid rgba(240, 163, 94, .25);
+    padding: 10px 16px calc(max(env(safe-area-inset-bottom), 10px));
+  }
+  #nowTitle {
+    text-align: center; font-weight: 600; font-size: .95rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px 6px;
+  }
+  #seekRow { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: var(--dim); }
+  #seek { flex: 1; accent-color: var(--accent2); height: 22px; }
+  #controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 2px; }
+  #controls button {
+    background: none; border: 0; color: var(--text); cursor: pointer;
+    font-size: 1.5rem; padding: 6px 10px; border-radius: 50%;
+  }
+  #controls button.mode { font-size: 1.1rem; color: var(--dim); }
+  #controls button.mode.on { color: var(--accent); }
+  #playBtn {
+    background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
+    color: #2a1020 !important; width: 62px; height: 62px; font-size: 1.7rem !important;
+    box-shadow: 0 4px 16px rgba(224, 92, 156, .4);
+  }
+  #controls button:active { transform: scale(.92); }
+
+  /* video overlay */
+  #videoWrap {
+    display: none; position: fixed; inset: 0; background: #000; z-index: 50;
+    flex-direction: column;
+  }
+  #videoWrap.show { display: flex; }
+  #videoClose {
+    position: absolute; top: max(env(safe-area-inset-top), 12px); right: 14px; z-index: 51;
+    background: rgba(0,0,0,.55); color: #fff; border: 0; border-radius: 999px;
+    font-size: 1.1rem; padding: 8px 14px; cursor: pointer;
+  }
+  #video { width: 100%; height: 100%; object-fit: contain; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="star">✦</span> Calypso Radio</h1>
+  <div style="display:flex;gap:8px;flex:none">
+    <a class="upload-btn" href="/create.html" style="text-decoration:none;background:var(--card-hi);color:var(--text);box-shadow:none">✨ Create</a>
+    <button class="upload-btn" id="uploadBtn">⬆ Add music</button>
+  </div>
+  <input type="file" id="fileInput" multiple hidden
+         accept=".mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,.mp4,.webm,.mov,.m4v,audio/*,video/*">
+</header>
+<div class="sub" id="countLine">Your high-vibration station</div>
+<div id="progressWrap"><div id="progressBar"></div></div>
+<div id="progressText"></div>
+
+<div id="list"></div>
+
+<div id="player">
+  <div id="nowTitle">Nothing playing yet — tap a track ✨</div>
+  <div id="seekRow">
+    <span id="tCur">0:00</span>
+    <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+    <span id="tDur">0:00</span>
+  </div>
+  <div id="controls">
+    <button class="mode" id="shuffleBtn" title="Shuffle">🔀</button>
+    <button id="prevBtn">⏮</button>
+    <button id="playBtn">▶</button>
+    <button id="nextBtn">⏭</button>
+    <button class="mode" id="repeatBtn" title="Repeat all">🔁</button>
+  </div>
+</div>
+
+<div id="videoWrap">
+  <button id="videoClose">✕ Close</button>
+  <video id="video" playsinline controls></video>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio'), video = $('video');
+
+let tracks = [];        // full list from server
+let queue = [];         // play order (indexes into tracks)
+let qPos = -1;          // position in queue
+let shuffle = false;
+let repeatAll = true;   // loop the whole library by default — good for walks
+
+const fmtTime = (s) => {
+  if (!isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m + ':' + String(sec).padStart(2, '0');
+};
+const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+
+async function loadTracks() {
+  const res = await fetch('/api/tracks');
+  tracks = await res.json();
+  renderList();
+  rebuildQueue();
+}
+
+function renderList() {
+  const list = $('list');
+  list.innerHTML = '';
+  $('countLine').textContent = tracks.length
+    ? tracks.length + (tracks.length === 1 ? ' track' : ' tracks') + ' of positivity & abundance ✨'
+    : 'Your high-vibration station';
+  if (!tracks.length) {
+    list.innerHTML = '<div id="empty"><div class="big">🎧</div>' +
+      'No music yet!<br>Tap <b>⬆ Add music</b> to upload your first AI tracks.</div>';
+    return;
+  }
+  tracks.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'track';
+    row.dataset.index = i;
+    row.innerHTML =
+      '<div class="art">' + (t.kind === 'video' ? '🎬' : '🎵') + '</div>' +
+      '<div class="info"><div class="title"></div>' +
+      '<div class="meta">' + t.kind + ' · ' + fmtSize(t.size) + '</div></div>' +
+      '<button class="del" title="Delete">🗑</button>';
+    row.querySelector('.title').textContent = t.title;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.del')) return;
+      playTrack(i);
+    });
+    row.querySelector('.del').addEventListener('click', async () => {
+      if (!confirm('Delete "' + t.title + '" forever?')) return;
+      await fetch('/api/tracks/' + encodeURIComponent(t.name), { method: 'DELETE' });
+      loadTracks();
+    });
+    list.appendChild(row);
+  });
+  highlightPlaying();
+}
+
+function rebuildQueue(keepCurrent) {
+  const current = keepCurrent && qPos >= 0 ? queue[qPos] : null;
+  queue = tracks.map((_, i) => i);
+  if (shuffle) {
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+  }
+  qPos = current !== null ? queue.indexOf(current) : -1;
+}
+
+function highlightPlaying() {
+  const cur = qPos >= 0 ? queue[qPos] : -1;
+  document.querySelectorAll('.track').forEach((el) => {
+    el.classList.toggle('playing', Number(el.dataset.index) === cur);
+  });
+}
+
+function playTrack(index) {
+  qPos = queue.indexOf(index);
+  startCurrent();
+}
+
+function startCurrent() {
+  if (qPos < 0 || qPos >= queue.length) return;
+  const t = tracks[queue[qPos]];
+  video.pause();
+  audio.pause();
+  if (t.kind === 'video') {
+    $('videoWrap').classList.add('show');
+    video.src = t.url;
+    video.play();
+  } else {
+    $('videoWrap').classList.remove('show');
+    video.removeAttribute('src');
+    audio.src = t.url;
+    audio.play();
+  }
+  $('nowTitle').textContent = '♪ ' + t.title;
+  highlightPlaying();
+  updateMediaSession(t);
+}
+
+function step(dir) {
+  if (!queue.length) return;
+  qPos += dir;
+  if (qPos >= queue.length) {
+    if (!repeatAll) { qPos = queue.length - 1; return; }
+    if (shuffle) rebuildQueue();
+    qPos = 0;
+  }
+  if (qPos < 0) qPos = queue.length - 1;
+  startCurrent();
+}
+
+function activeEl() {
+  return $('videoWrap').classList.contains('show') ? video : audio;
+}
+
+// --- controls ---
+$('playBtn').addEventListener('click', () => {
+  const el = activeEl();
+  if (!el.src) { if (queue.length) { qPos = 0; startCurrent(); } return; }
+  el.paused ? el.play() : el.pause();
+});
+$('nextBtn').addEventListener('click', () => step(1));
+$('prevBtn').addEventListener('click', () => {
+  const el = activeEl();
+  if (el.currentTime > 4) { el.currentTime = 0; } else { step(-1); }
+});
+$('shuffleBtn').addEventListener('click', () => {
+  shuffle = !shuffle;
+  $('shuffleBtn').classList.toggle('on', shuffle);
+  rebuildQueue(true);
+});
+$('repeatBtn').addEventListener('click', () => {
+  repeatAll = !repeatAll;
+  $('repeatBtn').classList.toggle('on', repeatAll);
+});
+$('repeatBtn').classList.add('on');
+$('videoClose').addEventListener('click', () => {
+  video.pause();
+  $('videoWrap').classList.remove('show');
+});
+
+// --- seek bar + time ---
+let seeking = false;
+$('seek').addEventListener('input', () => { seeking = true; });
+$('seek').addEventListener('change', () => {
+  const el = activeEl();
+  if (isFinite(el.duration)) el.currentTime = (el.value = $('seek').value) / 100 * el.duration;
+  seeking = false;
+});
+for (const el of [audio, video]) {
+  el.addEventListener('timeupdate', () => {
+    if (el !== activeEl()) return;
+    $('tCur').textContent = fmtTime(el.currentTime);
+    $('tDur').textContent = fmtTime(el.duration);
+    if (!seeking && isFinite(el.duration)) {
+      $('seek').value = (el.currentTime / el.duration) * 100;
+    }
+  });
+  el.addEventListener('ended', () => step(1));
+  el.addEventListener('play', () => { $('playBtn').textContent = '⏸'; });
+  el.addEventListener('pause', () => { $('playBtn').textContent = '▶'; });
+}
+
+// --- lock-screen controls (Media Session) ---
+function updateMediaSession(t) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: t.title,
+    artist: 'Calypso Radio',
+  });
+  navigator.mediaSession.setActionHandler('play', () => activeEl().play());
+  navigator.mediaSession.setActionHandler('pause', () => activeEl().pause());
+  navigator.mediaSession.setActionHandler('nexttrack', () => step(1));
+  navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
+}
+
+// --- upload ---
+$('uploadBtn').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', () => {
+  const files = $('fileInput').files;
+  if (!files.length) return;
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  $('progressWrap').style.display = 'block';
+  $('progressText').style.display = 'block';
+  xhr.upload.addEventListener('progress', (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round((e.loaded / e.total) * 100);
+    $('progressBar').style.width = pct + '%';
+    $('progressText').textContent = 'Uploading ' + files.length +
+      (files.length === 1 ? ' file' : ' files') + '… ' + pct + '%';
+  });
+  xhr.addEventListener('load', () => {
+    $('progressWrap').style.display = 'none';
+    $('progressText').style.display = 'none';
+    $('progressBar').style.width = '0%';
+    $('fileInput').value = '';
+    loadTracks();
+  });
+  xhr.addEventListener('error', () => {
+    $('progressText').textContent = 'Upload failed — try again?';
+  });
+  xhr.send(form);
+});
+
+loadTracks();
+</script>
+</body>
+</html>

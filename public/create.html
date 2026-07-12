@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1025">
+<title>✨ Create — Calypso Radio</title>
+<style>
+  :root {
+    --bg: #1a1025; --bg2: #241536; --card: #2d1b44; --card-hi: #3a2458;
+    --text: #f3ecff; --dim: #a894c9; --accent: #f0a35e; --accent2: #e05c9c;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%);
+    min-height: 100vh; color: var(--text); padding-bottom: 40px;
+  }
+  header { padding: max(env(safe-area-inset-top), 16px) 18px 4px; display: flex; align-items: center; gap: 10px; }
+  header a { color: var(--dim); text-decoration: none; font-size: 1.4rem; padding: 4px 8px; }
+  h1 { font-size: 1.35rem; margin: 0; }
+  .sub { color: var(--dim); font-size: .82rem; margin: 2px 18px 16px; }
+  section { margin: 0 16px 18px; }
+  .label { font-size: .8rem; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .moods { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mood {
+    background: var(--card); border: 2px solid transparent; border-radius: 14px;
+    padding: 12px; cursor: pointer; user-select: none;
+  }
+  .mood.sel { border-color: var(--accent); background: var(--card-hi); }
+  .mood .m-emoji { font-size: 1.4rem; }
+  .mood .m-name { font-weight: 700; margin-top: 4px; }
+  .mood .m-desc { color: var(--dim); font-size: .75rem; margin-top: 2px; line-height: 1.35; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    background: var(--card); border: 2px solid transparent; border-radius: 999px;
+    padding: 8px 16px; cursor: pointer; font-size: .9rem; user-select: none;
+  }
+  .chip.sel { border-color: var(--accent2); background: var(--card-hi); }
+  #nameInput {
+    width: 100%; background: var(--card); border: 2px solid transparent; border-radius: 12px;
+    color: var(--text); padding: 12px 14px; font-size: 1rem; outline: none;
+  }
+  #nameInput:focus { border-color: var(--accent); }
+  .dice { background: none; border: 0; color: var(--accent); font-size: 1.2rem; cursor: pointer; }
+  .name-row { display: flex; align-items: center; gap: 8px; }
+  #composeBtn {
+    display: block; width: calc(100% - 32px); margin: 22px 16px 0;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #2a1020; font-weight: 800; font-size: 1.1rem; border: 0; border-radius: 16px;
+    padding: 16px; cursor: pointer; box-shadow: 0 6px 20px rgba(224, 92, 156, .35);
+  }
+  #composeBtn:disabled { opacity: .55; }
+  #composeBtn:active { transform: scale(.98); }
+  #result {
+    display: none; margin: 18px 16px 0; background: var(--card); border-radius: 16px; padding: 16px;
+  }
+  #result .r-title { font-weight: 700; margin-bottom: 10px; }
+  #result audio { width: 100%; margin-bottom: 12px; }
+  .r-btns { display: flex; gap: 8px; }
+  .r-btns button {
+    flex: 1; border: 0; border-radius: 12px; padding: 12px; font-size: .95rem;
+    font-weight: 700; cursor: pointer;
+  }
+  #saveBtn { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #2a1020; }
+  #againBtn { background: var(--card-hi); color: var(--text); }
+  #status { text-align: center; color: var(--dim); font-size: .85rem; margin-top: 10px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/" title="Back to station">←</a>
+  <h1>✨ Music Creator</h1>
+</header>
+<div class="sub">Compose your own abundance music — made fresh, just for you</div>
+
+<section>
+  <div class="label">Mood</div>
+  <div class="moods" id="moods"></div>
+</section>
+
+<section>
+  <div class="label">Length</div>
+  <div class="chips" id="lengths"></div>
+</section>
+
+<section>
+  <div class="label">Track name</div>
+  <div class="name-row">
+    <input id="nameInput" maxlength="60">
+    <button class="dice" id="diceBtn" title="New name">🎲</button>
+  </div>
+</section>
+
+<button id="composeBtn">🎼 Compose my track</button>
+<div id="status"></div>
+
+<div id="result">
+  <div class="r-title" id="resultTitle"></div>
+  <audio id="preview" controls></audio>
+  <div class="r-btns">
+    <button id="againBtn">🎲 Compose again</button>
+    <button id="saveBtn">💾 Save to my station</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ---------- moods: musical personalities ----------
+const MOODS = [
+  { id: 'abundance', emoji: '🌻', name: 'Abundance', desc: 'Warm, golden, gently rising',
+    tempo: 66, chordSecs: 8, scale: [0, 2, 4, 7, 9],            // major pentatonic
+    prog: [0, 7, 9, 5], bright: 1200, arpChance: .62, keys: ['C', 'D', 'F', 'G'] },
+  { id: 'calm', emoji: '🌙', name: 'Deep Calm', desc: 'Slow, airy, floating',
+    tempo: 52, chordSecs: 11, scale: [0, 2, 4, 7, 9],
+    prog: [0, 5, 7, 5], bright: 800, arpChance: .45, keys: ['A', 'G', 'F'] },
+  { id: 'uplift', emoji: '🌅', name: 'Uplift', desc: 'Brighter, sparkling, hopeful',
+    tempo: 80, chordSecs: 6, scale: [0, 2, 4, 7, 9],
+    prog: [0, 9, 5, 7], bright: 1600, arpChance: .75, keys: ['D', 'E', 'G'] },
+  { id: 'meditate', emoji: '🧘‍♀️', name: 'Meditate', desc: 'Drone + soft binaural hum',
+    tempo: 48, chordSecs: 14, scale: [0, 3, 5, 7, 10],           // minor pentatonic
+    prog: [0, 0, 5, 0], bright: 650, arpChance: .3, binaural: true, keys: ['A', 'C'] },
+  // tuned to the measured fingerprint of her song "Kind Words Skin":
+  // ~65 BPM, D minor, mellow spectrum
+  { id: 'kindwords', emoji: '💗', name: 'Kind Words', desc: 'Soulful & warm, like your song',
+    tempo: 65, chordSecs: 7.4, scale: [0, 3, 5, 7, 10],
+    prog: [0, 8, 3, 10], bright: 950, arpChance: .55, keys: ['D'] },
+];
+const LENGTHS = [
+  { label: '1 min', secs: 60 }, { label: '2 min', secs: 120 },
+  { label: '3 min', secs: 180 }, { label: '5 min', secs: 300 },
+];
+const KEY_HZ = { C: 130.81, D: 146.83, E: 164.81, F: 174.61, G: 196.0, A: 220.0 };
+
+const ADJ = ['Golden', 'Radiant', 'Gentle', 'Rising', 'Infinite', 'Sunlit', 'Velvet',
+  'Emerald', 'Shimmering', 'Blooming', 'Sacred', 'Amber'];
+const NOUN = ['Abundance', 'Gratitude', 'Morning', 'River', 'Horizon', 'Garden',
+  'Light', 'Blessing', 'Overflow', 'Meadow', 'Dawn', 'Miracle'];
+const suggestName = () =>
+  ADJ[Math.floor(Math.random() * ADJ.length)] + ' ' + NOUN[Math.floor(Math.random() * NOUN.length)];
+
+let mood = MOODS[0], lengthSecs = 120, lastBlob = null, lastName = '';
+
+// ---------- UI ----------
+MOODS.forEach((m, i) => {
+  const el = document.createElement('div');
+  el.className = 'mood' + (i === 0 ? ' sel' : '');
+  el.innerHTML = '<div class="m-emoji">' + m.emoji + '</div><div class="m-name">' + m.name +
+    '</div><div class="m-desc">' + m.desc + '</div>';
+  el.addEventListener('click', () => {
+    mood = m;
+    document.querySelectorAll('.mood').forEach((x) => x.classList.remove('sel'));
+    el.classList.add('sel');
+  });
+  $('moods').appendChild(el);
+});
+LENGTHS.forEach((l, i) => {
+  const el = document.createElement('div');
+  el.className = 'chip' + (i === 1 ? ' sel' : '');
+  el.textContent = l.label;
+  el.addEventListener('click', () => {
+    lengthSecs = l.secs;
+    document.querySelectorAll('#lengths .chip').forEach((x) => x.classList.remove('sel'));
+    el.classList.add('sel');
+  });
+  $('lengths').appendChild(el);
+});
+$('nameInput').value = suggestName();
+$('diceBtn').addEventListener('click', () => { $('nameInput').value = suggestName(); });
+
+// ---------- the composer ----------
+async function compose() {
+  const rate = 44100;
+  const ctx = new OfflineAudioContext(2, rate * lengthSecs, rate);
+  const root = KEY_HZ[mood.keys[Math.floor(Math.random() * mood.keys.length)]];
+  const semi = (n) => root * Math.pow(2, n / 12);
+
+  // master chain: gentle compression + fade in/out
+  const master = ctx.createGain();
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.ratio.value = 4;
+  master.connect(comp); comp.connect(ctx.destination);
+  master.gain.setValueAtTime(0, 0);
+  master.gain.linearRampToValueAtTime(0.9, 3);
+  master.gain.setValueAtTime(0.9, lengthSecs - 4);
+  master.gain.linearRampToValueAtTime(0, lengthSecs - 0.1);
+
+  // echo/space for the melody
+  const delay = ctx.createDelay(1); delay.delayTime.value = 60 / mood.tempo * 0.75;
+  const fb = ctx.createGain(); fb.gain.value = 0.32;
+  const wet = ctx.createGain(); wet.gain.value = 0.28;
+  delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(master);
+
+  const padNote = (freq, t, dur, vol) => {
+    for (const det of [-4, 3]) {
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.value = freq; o.detune.value = det;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = mood.bright;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(vol, t + dur * 0.35);
+      g.gain.setValueAtTime(vol, t + dur * 0.7);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(t); o.stop(t + dur + 0.1);
+    }
+  };
+  const pluck = (freq, t, dur, vol) => {
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master); g.connect(delay);
+    o.start(t); o.stop(t + dur + 0.1);
+  };
+
+  // chords + bass
+  const chordDur = mood.chordSecs;
+  for (let t = 0; t < lengthSecs; t += chordDur) {
+    const degree = mood.prog[Math.floor(t / chordDur) % mood.prog.length];
+    const dur = Math.min(chordDur + 2, lengthSecs - t);
+    padNote(semi(degree), t, dur, 0.055);
+    padNote(semi(degree + 4), t, dur, 0.045);
+    padNote(semi(degree + 7), t, dur, 0.045);
+    padNote(semi(degree - 12), t, dur, 0.07); // bass root
+  }
+
+  // melody: gentle random walk on the pentatonic scale
+  const beat = 60 / mood.tempo / 2; // eighth notes
+  let step = Math.floor(Math.random() * 5) + 5; // start mid-range
+  for (let t = 4; t < lengthSecs - 6; t += beat) {
+    if (Math.random() > mood.arpChance) continue; // breathing room
+    step += [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)];
+    step = Math.max(0, Math.min(14, step));
+    const oct = Math.floor(step / 5), deg = mood.scale[step % 5];
+    pluck(semi(deg + 12 * (oct + 1)), t, beat * (Math.random() < 0.25 ? 6 : 3),
+      0.05 + Math.random() * 0.04);
+  }
+
+  // soft binaural hum for Meditate (few Hz difference L/R)
+  if (mood.binaural) {
+    const merger = ctx.createChannelMerger(2);
+    const gL = ctx.createGain(), gR = ctx.createGain();
+    gL.gain.value = 0.05; gR.gain.value = 0.05;
+    const oL = ctx.createOscillator(), oR = ctx.createOscillator();
+    oL.frequency.value = root / 2; oR.frequency.value = root / 2 + 6;
+    oL.connect(gL); gL.connect(merger, 0, 0);
+    oR.connect(gR); gR.connect(merger, 0, 1);
+    merger.connect(master);
+    oL.start(0); oR.start(0); oL.stop(lengthSecs); oR.stop(lengthSecs);
+  }
+
+  const buffer = await ctx.startRendering();
+  return bufferToWav(buffer);
+}
+
+function bufferToWav(buf) {
+  const ch = buf.numberOfChannels, len = buf.length, rate = buf.sampleRate;
+  const bytes = 44 + len * ch * 2;
+  const ab = new ArrayBuffer(bytes), v = new DataView(ab);
+  const wstr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  wstr(0, 'RIFF'); v.setUint32(4, bytes - 8, true); wstr(8, 'WAVE');
+  wstr(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, ch, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * ch * 2, true); v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true);
+  wstr(36, 'data'); v.setUint32(40, len * ch * 2, true);
+  let off = 44;
+  const chans = [];
+  for (let c = 0; c < ch; c++) chans.push(buf.getChannelData(c));
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < ch; c++) {
+      const s = Math.max(-1, Math.min(1, chans[c][i]));
+      v.setInt16(off, s * 32767, true); off += 2;
+    }
+  }
+  return new Blob([ab], { type: 'audio/wav' });
+}
+
+// ---------- buttons ----------
+async function doCompose() {
+  $('composeBtn').disabled = true;
+  $('result').style.display = 'none';
+  $('status').textContent = '🎼 Composing your ' + mood.name.toLowerCase() + ' track…';
+  try {
+    lastBlob = await compose();
+    lastName = ($('nameInput').value.trim() || suggestName());
+    $('preview').src = URL.createObjectURL(lastBlob);
+    $('resultTitle').textContent = '♪ ' + lastName;
+    $('result').style.display = 'block';
+    $('status').textContent = 'Listen, then save it — or roll again ✨';
+  } catch (e) {
+    $('status').textContent = 'Hmm, that one fizzled — try again?';
+  }
+  $('composeBtn').disabled = false;
+}
+$('composeBtn').addEventListener('click', doCompose);
+$('againBtn').addEventListener('click', () => { $('nameInput').value = suggestName(); doCompose(); });
+
+$('saveBtn').addEventListener('click', async () => {
+  if (!lastBlob) return;
+  $('saveBtn').disabled = true;
+  $('status').textContent = '💾 Saving to your station…';
+  const form = new FormData();
+  form.append('files', lastBlob, lastName + '.wav');
+  const res = await fetch('/api/upload', { method: 'POST', body: form });
+  if (res.ok) {
+    $('status').textContent = '✅ Saved! It’s in your station now.';
+  } else {
+    $('status').textContent = 'Save failed — try again?';
+  }
+  $('saveBtn').disabled = false;
+});
+</script>
+</body>
+</html>
