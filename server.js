@@ -123,15 +123,25 @@ const ORDER_FILE = path.join(MEDIA_DIR, '.order.json');
 const loadOrder = () => {
   try { return JSON.parse(fs.readFileSync(ORDER_FILE, 'utf8')); } catch { return []; }
 };
+const saveOrderList = (names) => fs.writeFileSync(ORDER_FILE, JSON.stringify(names));
+
+// --- hearts + play counts live with the music too ---
+const META_FILE = path.join(MEDIA_DIR, '.meta.json');
+const loadMeta = () => {
+  try { return JSON.parse(fs.readFileSync(META_FILE, 'utf8')); } catch { return {}; }
+};
+const saveMeta = (m) => fs.writeFileSync(META_FILE, JSON.stringify(m));
 
 // --- track list: her saved order; brand-new uploads float to the top ---
 app.get('/api/tracks', (req, res) => {
   const rank = new Map(loadOrder().map((n, i) => [n, i]));
+  const meta = loadMeta();
   const files = fs.readdirSync(MEDIA_DIR)
     .filter(allowedExt)
     .map((name) => {
       const st = fs.statSync(path.join(MEDIA_DIR, name));
       const ext = path.extname(name).toLowerCase();
+      const m = meta[name] || {};
       return {
         name,
         title: path.basename(name, ext).replace(/[_-]+/g, ' ').trim(),
@@ -139,6 +149,8 @@ app.get('/api/tracks', (req, res) => {
         size: st.size,
         mtime: st.mtimeMs,
         kind: VIDEO_EXT.has(ext) ? 'video' : 'audio',
+        heart: !!m.heart,
+        plays: m.plays || 0,
       };
     })
     .sort((a, b) => {
@@ -150,6 +162,53 @@ app.get('/api/tracks', (req, res) => {
       return ra - rb;
     });
   res.json(files);
+});
+
+// --- heart / un-heart a track ---
+app.post('/api/heart', (req, res) => {
+  const name = path.basename(String((req.body && req.body.name) || ''));
+  if (!allowedExt(name) || !fs.existsSync(path.join(MEDIA_DIR, name))) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  const meta = loadMeta();
+  meta[name] = meta[name] || {};
+  meta[name].heart = !!req.body.on;
+  saveMeta(meta);
+  res.json({ ok: true, heart: meta[name].heart });
+});
+
+// --- count a play ---
+app.post('/api/played', (req, res) => {
+  const name = path.basename(String((req.body && req.body.name) || ''));
+  if (!allowedExt(name)) return res.status(404).json({ error: 'not found' });
+  const meta = loadMeta();
+  meta[name] = meta[name] || {};
+  meta[name].plays = (meta[name].plays || 0) + 1;
+  saveMeta(meta);
+  res.json({ ok: true, plays: meta[name].plays });
+});
+
+// --- rename a track (keeps its hearts, plays, and place in the order) ---
+app.post('/api/rename', (req, res) => {
+  const name = path.basename(String((req.body && req.body.name) || ''));
+  const full = path.join(MEDIA_DIR, name);
+  if (!allowedExt(name) || !fs.existsSync(full)) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  const title = String((req.body && req.body.title) || '')
+    .replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!title) return res.status(400).json({ error: 'name cannot be empty' });
+  const ext = path.extname(name);
+  let candidate = title + ext;
+  let n = 2;
+  while (candidate !== name && fs.existsSync(path.join(MEDIA_DIR, candidate))) {
+    candidate = `${title} (${n++})${ext}`;
+  }
+  fs.renameSync(full, path.join(MEDIA_DIR, candidate));
+  saveOrderList(loadOrder().map((o) => (o === name ? candidate : o)));
+  const meta = loadMeta();
+  if (meta[name]) { meta[candidate] = meta[name]; delete meta[name]; saveMeta(meta); }
+  res.json({ ok: true, name: candidate });
 });
 
 // --- save a new song order ---

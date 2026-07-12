@@ -67,8 +67,14 @@
   .track .handle:active { cursor: grabbing; color: var(--accent); }
   .track .art {
     width: 42px; height: 42px; flex: none; border-radius: 10px; display: grid; place-items: center;
-    background: linear-gradient(135deg, #5b3a8c, #8c3a6e); font-size: 1.2rem;
+    background: linear-gradient(135deg, #5b3a8c, #8c3a6e); font-size: 1.1rem;
+    background-size: cover; background-position: center;
   }
+  .track .mini {
+    flex: none; background: none; border: 0; font-size: 1rem;
+    padding: 8px 3px; cursor: pointer; border-radius: 8px; color: var(--dim);
+  }
+  .track .mini:active { transform: scale(1.2); }
   .track .info { flex: 1; min-width: 0; }
   .track .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .track .meta { color: var(--dim); font-size: .78rem; margin-top: 2px; }
@@ -199,6 +205,38 @@ const fmtTime = (s) => {
 };
 const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
 
+const api = (url, body) => fetch(url, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+}).then((r) => r.json()).catch(() => null);
+
+// every track gets its own little cover, painted from its name
+const coverCache = new Map();
+function coverFor(name, size) {
+  const key = name + '@' + size;
+  if (coverCache.has(key)) return coverCache.get(key);
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue1 = h % 360, hue2 = (hue1 + 50 + (h >> 4) % 90) % 360;
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, 'hsl(' + hue1 + ' 48% 40%)');
+  g.addColorStop(1, 'hsl(' + hue2 + ' 55% 22%)');
+  x.fillStyle = g; x.fillRect(0, 0, size, size);
+  const rg = x.createRadialGradient(size * .68, size * .3, size * .04, size * .68, size * .3, size * .65);
+  rg.addColorStop(0, 'rgba(255,222,160,.45)'); rg.addColorStop(1, 'rgba(255,222,160,0)');
+  x.fillStyle = rg; x.fillRect(0, 0, size, size);
+  x.fillStyle = 'rgba(255,255,255,.92)';
+  x.font = 'bold ' + size * .46 + 'px serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('✦', size / 2, size * .55);
+  const url = c.toDataURL('image/png');
+  coverCache.set(key, url);
+  return url;
+}
+
 async function loadTracks() {
   const res = await fetch('/api/tracks');
   tracks = await res.json();
@@ -228,16 +266,32 @@ function renderList() {
     row.dataset.index = i;
     row.innerHTML =
       '<button class="handle" title="Hold and drag to reorder">☰</button>' +
-      '<div class="art">' + (t.kind === 'video' ? '🎬' : '🎵') + '</div>' +
+      '<div class="art">' + (t.kind === 'video' ? '🎬' : '') + '</div>' +
       '<div class="info"><div class="title"></div>' +
-      '<div class="meta">' + t.kind + ' · ' + fmtSize(t.size) + '</div></div>' +
+      '<div class="meta">' + t.kind + ' · ' + fmtSize(t.size) +
+      (t.plays ? ' · ▶ ' + t.plays : '') + '</div></div>' +
+      '<button class="mini heart" title="Favorite">' + (t.heart ? '❤️' : '🤍') + '</button>' +
+      '<button class="mini edit" title="Rename">✏️</button>' +
       '<button class="del" title="Delete">🗑</button>';
     row.querySelector('.title').textContent = t.title;
+    row.querySelector('.art').style.backgroundImage = 'url(' + coverFor(t.name, 84) + ')';
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.del') || e.target.closest('.handle')) return;
+      if (e.target.closest('.del') || e.target.closest('.handle') ||
+          e.target.closest('.heart') || e.target.closest('.edit')) return;
       playTrack(i);
     });
     wireReorder(row.querySelector('.handle'), row);
+    row.querySelector('.heart').addEventListener('click', async () => {
+      await api('/api/heart', { name: t.name, on: !t.heart });
+      loadTracks();
+    });
+    row.querySelector('.edit').addEventListener('click', async () => {
+      const title = prompt('Rename this track:', t.title);
+      if (title === null || !title.trim()) return;
+      const out = await api('/api/rename', { name: t.name, title: title.trim() });
+      if (out && out.name && currentName === t.name) currentName = out.name;
+      loadTracks();
+    });
     row.querySelector('.del').addEventListener('click', async () => {
       if (!confirm('Delete "' + t.title + '" forever?')) return;
       await fetch('/api/tracks/' + encodeURIComponent(t.name), { method: 'DELETE' });
@@ -330,6 +384,7 @@ function startCurrent() {
   $('nowTitle').textContent = '♪ ' + t.title;
   highlightPlaying();
   updateMediaSession(t);
+  api('/api/played', { name: t.name }); // count it (fire and forget)
 }
 
 function step(dir) {
@@ -412,6 +467,7 @@ function updateMediaSession(t) {
   navigator.mediaSession.metadata = new MediaMetadata({
     title: t.title,
     artist: 'Calypso Radio',
+    artwork: [{ src: coverFor(t.name, 512), sizes: '512x512', type: 'image/png' }],
   });
   navigator.mediaSession.setActionHandler('play', () => activeEl().play());
   navigator.mediaSession.setActionHandler('pause', () => activeEl().pause());
