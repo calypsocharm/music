@@ -20,7 +20,7 @@
     --dim: #a894c9;
     --accent: #f0a35e;
     --accent2: #e05c9c;
-    --player-h: 148px;
+    --player-h: 178px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -87,6 +87,8 @@
   }
   #seekRow { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: var(--dim); }
   #seek { flex: 1; accent-color: var(--accent2); height: 22px; }
+  #volRow { display: flex; align-items: center; gap: 8px; font-size: .85rem; padding: 0 24px; }
+  #vol { flex: 1; accent-color: var(--accent); height: 20px; }
   #controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 2px; }
   #controls button {
     background: none; border: 0; color: var(--text); cursor: pointer;
@@ -156,6 +158,11 @@
     <button id="playBtn">▶</button>
     <button id="nextBtn">⏭</button>
     <button class="mode" id="repeatBtn" title="Repeat all">🔁</button>
+  </div>
+  <div id="volRow">
+    <span>🔈</span>
+    <input type="range" id="vol" min="0" max="100" value="100">
+    <span>🔊</span>
   </div>
 </div>
 
@@ -334,6 +341,16 @@ for (const el of [audio, video]) {
   el.addEventListener('play', () => { $('playBtn').textContent = '⏸'; });
   el.addEventListener('pause', () => { $('playBtn').textContent = '▶'; });
 }
+
+// --- volume (remembered between visits) ---
+const savedVol = localStorage.getItem('vol');
+const applyVol = (v) => { audio.volume = v / 100; video.volume = v / 100; };
+$('vol').value = savedVol === null ? 100 : Number(savedVol);
+applyVol($('vol').value);
+$('vol').addEventListener('input', () => {
+  applyVol($('vol').value);
+  localStorage.setItem('vol', $('vol').value);
+});
 
 // --- lock-screen controls (Media Session) ---
 function updateMediaSession(t) {
