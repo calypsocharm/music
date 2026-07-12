@@ -4,9 +4,8 @@ Her note: the composer is cool but doesn't make *songs*. This is the
 "how could this app be greater" list. Claude's top picks: **#2, #5, #1**.
 
 ## 🎤 Closing the "real songs" gap
-1. **Plug in a real AI music service** (ElevenLabs Music / Stable Audio API):
-   type a description → real sung song lands in the library. Needs an account
-   + costs per song. (Suno has no public API.)
+1. ~~**Plug in a real AI music service**~~ — DECLINED 2026-07-12: "Suno is enough."
+   Suno stays the songwriter, the station stays the player.
 2. **Spoken affirmations over composed music** — she writes affirmations, a
    warm TTS voice reads them over an ambient bed. Cheap, unique to her,
    very on-brand. ⭐ sleeper favorite
@@ -20,9 +19,9 @@ Her note: the composer is cool but doesn't make *songs*. This is the
 7. **Crossfade** between tracks.
 
 ## 📚 Lovelier library
-8. **Album art** — generated covers instead of the 🎵 tile.
-9. **Hearts & play counts.**
-10. **Rename/edit titles in-app.**
+8. ~~**Album art**~~ ✅ DONE 2026-07-12 (painted from track name, incl. lock screen)
+9. ~~**Hearts & play counts**~~ ✅ DONE 2026-07-12
+10. ~~**Rename/edit titles in-app**~~ ✅ DONE 2026-07-12
 11. **Auto MP3 compression on upload** (shrink big WAVs).
 
 ## 💰 The Calypso twist
