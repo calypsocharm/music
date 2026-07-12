@@ -98,6 +98,17 @@
   }
   #controls button:active { transform: scale(.92); }
 
+  /* drag & drop overlay */
+  #dropZone {
+    display: none; position: fixed; inset: 10px; z-index: 60;
+    border: 3px dashed var(--accent); border-radius: 22px;
+    background: rgba(26, 16, 37, .88); backdrop-filter: blur(4px);
+    place-items: center; text-align: center; color: var(--text);
+    font-size: 1.3rem; font-weight: 700; pointer-events: none;
+  }
+  #dropZone.show { display: grid; }
+  #dropZone .hint { color: var(--dim); font-size: .9rem; font-weight: 400; margin-top: 8px; }
+
   /* video overlay */
   #videoWrap {
     display: none; position: fixed; inset: 0; background: #000; z-index: 50;
@@ -143,6 +154,8 @@
     <button class="mode" id="repeatBtn" title="Repeat all">🔁</button>
   </div>
 </div>
+
+<div id="dropZone">🎶 Drop your music here!<div class="hint">It uploads straight to your station</div></div>
 
 <div id="videoWrap">
   <button id="videoClose">✕ Close</button>
@@ -331,10 +344,10 @@ function updateMediaSession(t) {
   navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
 }
 
-// --- upload ---
-$('uploadBtn').addEventListener('click', () => $('fileInput').click());
-$('fileInput').addEventListener('change', () => {
-  const files = $('fileInput').files;
+// --- upload (button + drag & drop share this) ---
+const MEDIA_RE = /\.(mp3|m4a|aac|wav|ogg|opus|flac|mp4|webm|mov|m4v)$/i;
+function uploadFiles(files) {
+  files = [...files].filter((f) => MEDIA_RE.test(f.name));
   if (!files.length) return;
   const form = new FormData();
   for (const f of files) form.append('files', f);
@@ -360,6 +373,28 @@ $('fileInput').addEventListener('change', () => {
     $('progressText').textContent = 'Upload failed — try again?';
   });
   xhr.send(form);
+}
+$('uploadBtn').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', () => uploadFiles($('fileInput').files));
+
+// drag & drop anywhere on the page
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => {
+  if ([...(e.dataTransfer ? e.dataTransfer.types : [])].includes('Files')) {
+    e.preventDefault();
+    dragDepth++;
+    $('dropZone').classList.add('show');
+  }
+});
+document.addEventListener('dragleave', () => {
+  if (--dragDepth <= 0) { dragDepth = 0; $('dropZone').classList.remove('show'); }
+});
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  $('dropZone').classList.remove('show');
+  if (e.dataTransfer) uploadFiles(e.dataTransfer.files);
 });
 
 loadTracks();
