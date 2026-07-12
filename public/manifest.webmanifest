@@ -1,7 +1,7 @@
 {
   "name": "Calypso Radio",
   "short_name": "Calypso",
-  "description": "Your private high-vibration music station",
+  "description": "Your private high-vibration music station (v1.1)",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1025",
