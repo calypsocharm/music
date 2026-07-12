@@ -134,6 +134,7 @@
          accept=".mp3,.m4a,.aac,.wav,.ogg,.opus,.flac,.mp4,.webm,.mov,.m4v,audio/*,video/*">
 </header>
 <div class="sub" id="countLine">Your high-vibration station</div>
+<div class="sub" id="pinLine" style="display:none"></div>
 <div id="progressWrap"><div id="progressBar"></div></div>
 <div id="progressText"></div>
 
@@ -398,6 +399,14 @@ document.addEventListener('drop', (e) => {
 });
 
 loadTracks();
+
+// show the short phone code so she can read it off the computer screen
+fetch('/api/info').then((r) => r.json()).then((info) => {
+  if (!info.pin) return;
+  $('pinLine').style.display = 'block';
+  $('pinLine').innerHTML = '📱 Phone code: <b style="letter-spacing:2px">' + info.pin +
+    '</b> — type it at music.atmosphereengine.com on any device';
+}).catch(() => {});
 </script>
 </body>
 </html>
