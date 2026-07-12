@@ -400,12 +400,28 @@ document.addEventListener('drop', (e) => {
 
 loadTracks();
 
-// show the short phone code so she can read it off the computer screen
-fetch('/api/info').then((r) => r.json()).then((info) => {
-  if (!info.pin) return;
+// show the station passcode, with a way to pick your own
+function showPin(pin) {
   $('pinLine').style.display = 'block';
-  $('pinLine').innerHTML = '📱 Phone code: <b style="letter-spacing:2px">' + info.pin +
-    '</b> — type it at music.atmosphereengine.com on any device';
+  $('pinLine').innerHTML = '🔑 Station passcode: <b style="letter-spacing:1px"></b> ' +
+    '&nbsp;<a href="#" id="changePin" style="color:var(--accent)">change</a>';
+  $('pinLine').querySelector('b').textContent = pin;
+  $('changePin').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const code = prompt('Pick your new station passcode (at least 6 characters):');
+    if (code === null) return;
+    const res = await fetch('/api/passcode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'code=' + encodeURIComponent(code),
+    });
+    const data = await res.json();
+    if (res.ok) { showPin(data.pin); alert('Done! Your new passcode is: ' + data.pin); }
+    else alert(data.error || 'That one didn’t work — try another?');
+  });
+}
+fetch('/api/info').then((r) => r.json()).then((info) => {
+  if (info.pin) showPin(info.pin);
 }).catch(() => {});
 </script>
 </body>

@@ -100,6 +100,17 @@ app.use((req, res, next) => {
 // --- station info for the player page (already behind auth) ---
 app.get('/api/info', (req, res) => res.json({ pin: PIN }));
 
+// --- let her choose her own station passcode (already behind auth) ---
+app.post('/api/passcode', (req, res) => {
+  const code = String((req.body && req.body.code) || '').trim();
+  if (code.length < 6 || code.length > 60) {
+    return res.status(400).json({ error: 'Passcode needs to be 6 to 60 characters.' });
+  }
+  PIN = code;
+  fs.writeFileSync(PIN_FILE, PIN + '\n');
+  res.json({ ok: true, pin: PIN });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/media', express.static(MEDIA_DIR)); // supports Range requests for seeking
 
