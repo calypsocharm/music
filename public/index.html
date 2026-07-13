@@ -143,7 +143,9 @@
 <body>
 <header>
   <h1><span class="star">✦</span> Calypso Radio</h1>
-  <div style="display:flex;gap:8px;flex:none">
+  <div style="display:flex;gap:8px;flex:none;align-items:center">
+    <button id="refreshBtn" title="Update the app to the newest version"
+      style="background:var(--card-hi);color:var(--dim);border:0;border-radius:999px;width:38px;height:38px;font-size:1.1rem;cursor:pointer">↻</button>
     <a class="upload-btn" href="/create.html" style="text-decoration:none;background:var(--card-hi);color:var(--text);box-shadow:none">✨ Create</a>
     <button class="upload-btn" id="uploadBtn">⬆ Add music</button>
   </div>
@@ -153,6 +155,7 @@
 <div class="sub" id="countLine">Your high-vibration station</div>
 <div class="sub" id="pinLine" style="display:none"></div>
 <div class="sub" id="offlineLine" style="display:none"></div>
+<div class="sub" id="updateLine" style="display:none;color:var(--accent);font-weight:700;cursor:pointer">✨ A new version of Calypso Radio is here — tap to update</div>
 <div id="progressWrap"><div id="progressBar"></div></div>
 <div id="progressText"></div>
 
@@ -745,9 +748,37 @@ function showPin(pin) {
     else alert(data.error || 'That one didn’t work — try another?');
   });
 }
+let loadedVersion = null;
 fetch('/api/info').then((r) => r.json()).then((info) => {
   if (info.pin) showPin(info.pin);
+  loadedVersion = info.version || null;
 }).catch(() => {});
+
+// --- the ↻ button: fetch the newest version of the app ---
+async function hardRefresh() {
+  try {
+    if ('caches' in window) await caches.delete('radio-shell-v1');
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) await reg.update();
+  } catch (_) {}
+  location.reload();
+}
+$('refreshBtn').addEventListener('click', hardRefresh);
+$('updateLine').addEventListener('click', hardRefresh);
+
+// quietly notice when the station has a newer version than this page
+async function checkVersion() {
+  try {
+    const info = await (await fetch('/api/info')).json();
+    if (loadedVersion && info.version && info.version !== loadedVersion) {
+      $('updateLine').style.display = 'block';
+    }
+  } catch (_) {}
+}
+setInterval(checkVersion, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkVersion();
+});
 </script>
 </body>
 </html>

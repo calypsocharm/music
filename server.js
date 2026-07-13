@@ -107,7 +107,11 @@ app.use((req, res, next) => {
 });
 
 // --- station info for the player page (already behind auth) ---
-app.get('/api/info', (req, res) => res.json({ pin: PIN }));
+let APP_VERSION = String(Date.now()); // fallback if git is unavailable
+execFile('git', ['rev-parse', '--short', 'HEAD'], { cwd: __dirname }, (err, out) => {
+  if (!err && out.trim()) APP_VERSION = out.trim();
+});
+app.get('/api/info', (req, res) => res.json({ pin: PIN, version: APP_VERSION }));
 
 // --- let her choose her own station passcode (already behind auth) ---
 app.post('/api/passcode', (req, res) => {
