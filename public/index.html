@@ -98,7 +98,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px 6px;
   }
   #seekRow { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: var(--dim); }
-  #seek { flex: 1; accent-color: var(--accent2); height: 22px; }
+  #seek { flex: 1; accent-color: var(--accent2); height: 32px; }
   #volRow { display: flex; align-items: center; gap: 8px; font-size: .85rem; padding: 0 24px; }
   #vol { flex: 1; accent-color: var(--accent); height: 20px; }
   #controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 2px; }
@@ -247,6 +247,33 @@ async function loadTracks() {
     qPos = i >= 0 ? queue.indexOf(i) : -1;
     highlightPlaying();
   }
+}
+
+// --- remember the spot: save every few seconds, offer to resume on return ---
+setInterval(() => {
+  const el = activeEl();
+  if (currentName && !el.paused && el.currentTime > 5) {
+    localStorage.setItem('resume', JSON.stringify({ name: currentName, t: el.currentTime }));
+  }
+}, 3000);
+
+function restoreResume() {
+  let r = null;
+  try { r = JSON.parse(localStorage.getItem('resume') || 'null'); } catch (_) {}
+  if (!r || !r.name) return;
+  const i = tracks.findIndex((t) => t.name === r.name);
+  if (i < 0) return;
+  const t = tracks[i];
+  if (t.kind !== 'audio') return;
+  qPos = queue.indexOf(i);
+  currentName = t.name;
+  audio.src = t.url;
+  audio.addEventListener('loadedmetadata', () => {
+    if (isFinite(audio.duration) && r.t < audio.duration - 3) audio.currentTime = r.t;
+  }, { once: true });
+  $('nowTitle').textContent = '♪ ' + t.title + ' — resumes at ' + fmtTime(r.t);
+  highlightPlaying();
+  updateMediaSession(t);
 }
 
 function renderList() {
@@ -563,7 +590,7 @@ document.addEventListener('drop', (e) => {
   if (e.dataTransfer) uploadFiles(e.dataTransfer.files);
 });
 
-loadTracks();
+loadTracks().then(restoreResume);
 
 // installable-app support
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
