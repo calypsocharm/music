@@ -10,6 +10,13 @@ if ! command -v pm2 >/dev/null 2>&1; then
 fi
 command -v pm2 >/dev/null 2>&1 || { echo "[$(date)] ERROR: cannot find pm2"; exit 1; }
 
+# one-time: the MP3 shrinker needs ffmpeg
+command -v ffmpeg >/dev/null 2>&1 || {
+  echo "[$(date)] installing ffmpeg for MP3 shrinking..."
+  apt-get install -y -qq ffmpeg >/dev/null 2>&1 && pm2 restart calypso-radio \
+    || echo "[$(date)] WARN: ffmpeg install failed"
+}
+
 cd /opt/calypso-radio || exit 1
 git fetch -q origin main || { echo "[$(date)] ERROR: git fetch failed"; exit 1; }
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then

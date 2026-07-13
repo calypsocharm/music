@@ -552,8 +552,9 @@ function uploadFiles(files) {
     if (!e.lengthComputable) return;
     const pct = Math.round((e.loaded / e.total) * 100);
     $('progressBar').style.width = pct + '%';
-    $('progressText').textContent = 'Uploading ' + files.length +
-      (files.length === 1 ? ' file' : ' files') + '… ' + pct + '%';
+    $('progressText').textContent = pct >= 100
+      ? 'Uploaded — shrinking big files to MP3…'
+      : 'Uploading ' + files.length + (files.length === 1 ? ' file' : ' files') + '… ' + pct + '%';
   });
   xhr.addEventListener('load', () => {
     $('progressWrap').style.display = 'none';

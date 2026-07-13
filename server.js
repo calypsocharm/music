@@ -5,6 +5,7 @@ const multer = require('multer');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const PORT = process.env.PORT || 8300;
 const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, 'media');
@@ -304,8 +305,60 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, allowedExt(file.originalname)),
 });
 
-app.post('/api/upload', upload.array('files', 50), (req, res) => {
-  res.json({ uploaded: (req.files || []).map((f) => f.filename) });
+// --- big lossless files get shrunk to high-quality MP3 (192 kbps) ---
+const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
+const LOSSLESS_EXT = new Set(['.wav', '.flac']);
+let ffmpegOk = false;
+execFile(FFMPEG, ['-version'], (err) => {
+  ffmpegOk = !err;
+  console.log(ffmpegOk ? 'ffmpeg found: MP3 shrinking is ON'
+    : 'ffmpeg not found: uploads are kept as-is');
+  if (ffmpegOk) sweepLossless(); // shrink anything already in the library
+});
+
+function shrinkToMp3(name) {
+  return new Promise((resolve, reject) => {
+    const ext = path.extname(name);
+    const base = path.basename(name, ext);
+    let target = base + '.mp3';
+    let n = 2;
+    while (fs.existsSync(path.join(MEDIA_DIR, target))) target = `${base} (${n++}).mp3`;
+    const out = path.join(MEDIA_DIR, target);
+    execFile(FFMPEG, ['-i', path.join(MEDIA_DIR, name),
+      '-codec:a', 'libmp3lame', '-b:a', '192k', '-y', out], (err) => {
+      if (err) {
+        try { fs.unlinkSync(out); } catch (_) {}
+        return reject(err);
+      }
+      // the shrunk file inherits the original's order slot, hearts, and plays
+      saveOrderList(loadOrder().map((o) => (o === name ? target : o)));
+      const meta = loadMeta();
+      if (meta[name]) { meta[target] = meta[name]; delete meta[name]; saveMeta(meta); }
+      fs.unlinkSync(path.join(MEDIA_DIR, name));
+      console.log(`shrunk: ${name} -> ${target}`);
+      resolve(target);
+    });
+  });
+}
+
+async function sweepLossless() {
+  for (const name of fs.readdirSync(MEDIA_DIR)) {
+    if (LOSSLESS_EXT.has(path.extname(name).toLowerCase())) {
+      await shrinkToMp3(name).catch((e) => console.log(`shrink failed for ${name}:`, e.message));
+    }
+  }
+}
+
+app.post('/api/upload', upload.array('files', 50), async (req, res) => {
+  const names = [];
+  for (const f of req.files || []) {
+    if (ffmpegOk && LOSSLESS_EXT.has(path.extname(f.filename).toLowerCase())) {
+      names.push(await shrinkToMp3(f.filename).catch(() => f.filename));
+    } else {
+      names.push(f.filename);
+    }
+  }
+  res.json({ uploaded: names });
 });
 
 // --- delete a track ---
