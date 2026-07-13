@@ -22,7 +22,8 @@ Her note: the composer is cool but doesn't make *songs*. This is the
 8. ~~**Album art**~~ ✅ DONE 2026-07-12 (painted from track name, incl. lock screen)
 9. ~~**Hearts & play counts**~~ ✅ DONE 2026-07-12
 10. ~~**Rename/edit titles in-app**~~ ✅ DONE 2026-07-12
-11. **Auto MP3 compression on upload** (shrink big WAVs).
+11. ~~**Auto MP3 compression on upload**~~ ✅ DONE 2026-07-12 — ffmpeg → 192k MP3,
+    existing library swept on startup, metadata survives.
 
 ## 💰 The Calypso twist
 12. ~~**Public channel**~~ ✅ DONE 2026-07-12 — 🌍 button shares a track to
