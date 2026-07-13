@@ -170,6 +170,7 @@
     <button id="playBtn">▶</button>
     <button id="nextBtn">⏭</button>
     <button class="mode" id="repeatBtn" title="Repeat all">🔁</button>
+    <button class="mode" id="djBtn" title="DJ mode — songs fade into each other">🎚️</button>
   </div>
   <div id="volRow">
     <span>🔈</span>
@@ -186,10 +187,14 @@
 </div>
 
 <audio id="audio" preload="metadata"></audio>
+<audio id="audioB" preload="metadata"></audio>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const audio = $('audio'), video = $('video');
+const audioA = $('audio'), audioB = $('audioB'), video = $('video');
+let audio = audioA;   // the "front turntable" — DJ mode swaps between A and B
+let fadeIv = null;    // running crossfade, if any
+let djMode = localStorage.getItem('dj') === '1';
 
 let tracks = [];        // full list from server
 let queue = [];         // play order (indexes into tracks)
@@ -424,8 +429,10 @@ function startCurrent() {
   if (qPos < 0 || qPos >= queue.length) return;
   const t = tracks[queue[qPos]];
   currentName = t.name;
+  cancelFade();
   video.pause();
-  audio.pause();
+  audioA.pause();
+  audioB.pause();
   if (t.kind === 'video') {
     $('videoWrap').classList.add('show');
     video.src = t.url;
@@ -493,7 +500,7 @@ $('seek').addEventListener('change', () => {
   if (isFinite(el.duration)) el.currentTime = (el.value = $('seek').value) / 100 * el.duration;
   seeking = false;
 });
-for (const el of [audio, video]) {
+for (const el of [audioA, audioB, video]) {
   el.addEventListener('timeupdate', () => {
     if (el !== activeEl()) return;
     $('tCur').textContent = fmtTime(el.currentTime);
@@ -501,21 +508,82 @@ for (const el of [audio, video]) {
     if (!seeking && isFinite(el.duration)) {
       $('seek').value = (el.currentTime / el.duration) * 100;
     }
+    // DJ mode: when a song nears its end, blend the next one in
+    if (djMode && !fadeIv && el !== video && isFinite(el.duration) &&
+        el.duration > 20 && el.duration - el.currentTime <= 7) {
+      crossfadeToNext();
+    }
   });
-  el.addEventListener('ended', () => step(1));
+  el.addEventListener('ended', () => { if (el === activeEl()) step(1); });
   el.addEventListener('play', () => {
+    if (el !== activeEl()) return;
     $('playBtn').textContent = '⏸';
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
   });
   el.addEventListener('pause', () => {
+    if (el !== activeEl()) return;
     $('playBtn').textContent = '▶';
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
   });
 }
 
+// --- DJ mode: the two turntables trade places in a 6-second blend ---
+const FADE_MS = 6000;
+const masterVol = () => Number($('vol').value) / 100;
+
+function cancelFade() {
+  if (fadeIv) { clearInterval(fadeIv); fadeIv = null; }
+  audioA.volume = masterVol();
+  audioB.volume = masterVol();
+}
+
+function crossfadeToNext() {
+  if (fadeIv || !queue.length) return;
+  let nextQ = qPos + 1;
+  if (nextQ >= queue.length) { if (!repeatAll) return; nextQ = 0; }
+  const t = tracks[queue[nextQ]];
+  if (!t || t.kind !== 'audio') return; // videos take the stage alone
+  const oldDeck = audio;
+  const newDeck = audio === audioA ? audioB : audioA;
+  newDeck.src = t.url;
+  newDeck.volume = 0;
+  playResilient(newDeck);
+  audio = newDeck;
+  qPos = nextQ;
+  currentName = t.name;
+  $('nowTitle').textContent = '♪ ' + t.title;
+  highlightPlaying();
+  updateMediaSession(t);
+  api('/api/played', { name: t.name });
+  preloadNext();
+  const started = Date.now();
+  fadeIv = setInterval(() => {
+    const f = Math.min(1, (Date.now() - started) / FADE_MS);
+    const mv = masterVol();
+    newDeck.volume = mv * f;
+    oldDeck.volume = mv * (1 - f);
+    if (f >= 1) {
+      clearInterval(fadeIv); fadeIv = null;
+      oldDeck.pause();
+      oldDeck.removeAttribute('src');
+      newDeck.volume = mv;
+    }
+  }, 100);
+}
+
+$('djBtn').classList.toggle('on', djMode);
+$('djBtn').addEventListener('click', () => {
+  djMode = !djMode;
+  localStorage.setItem('dj', djMode ? '1' : '0');
+  $('djBtn').classList.toggle('on', djMode);
+});
+
 // --- volume (remembered between visits) ---
 const savedVol = localStorage.getItem('vol');
-const applyVol = (v) => { audio.volume = v / 100; video.volume = v / 100; };
+const applyVol = (v) => {
+  if (!fadeIv) { audioA.volume = v / 100; audioB.volume = v / 100; }
+  video.volume = v / 100;
+};
 $('vol').value = savedVol === null ? 100 : Number(savedVol);
 applyVol($('vol').value);
 $('vol').addEventListener('input', () => {
