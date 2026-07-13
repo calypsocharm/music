@@ -1,9 +1,9 @@
 {
-  "id": "/",
+  "id": "/channel",
   "name": "Calypso Radio",
   "short_name": "Calypso",
-  "description": "Your private high-vibration music station (v1.1)",
-  "start_url": "/",
+  "description": "Positivity & abundance music from Calypso",
+  "start_url": "/channel",
   "display": "standalone",
   "background_color": "#1a1025",
   "theme_color": "#1a1025",

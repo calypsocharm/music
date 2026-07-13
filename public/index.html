@@ -270,6 +270,8 @@ function renderList() {
       '<div class="info"><div class="title"></div>' +
       '<div class="meta">' + t.kind + ' · ' + fmtSize(t.size) +
       (t.plays ? ' · ▶ ' + t.plays : '') + '</div></div>' +
+      '<button class="mini pub" title="' + (t.public ? 'Shared on your public channel' : 'Share to public channel') + '"' +
+      (t.public ? '' : ' style="filter:grayscale(1);opacity:.45"') + '>🌍</button>' +
       '<button class="mini heart" title="Favorite">' + (t.heart ? '❤️' : '🤍') + '</button>' +
       '<button class="mini edit" title="Rename">✏️</button>' +
       '<button class="del" title="Delete">🗑</button>';
@@ -277,10 +279,17 @@ function renderList() {
     row.querySelector('.art').style.backgroundImage = 'url(' + coverFor(t.name, 84) + ')';
     row.addEventListener('click', (e) => {
       if (e.target.closest('.del') || e.target.closest('.handle') ||
-          e.target.closest('.heart') || e.target.closest('.edit')) return;
+          e.target.closest('.heart') || e.target.closest('.edit') ||
+          e.target.closest('.pub')) return;
       playTrack(i);
     });
     wireReorder(row.querySelector('.handle'), row);
+    row.querySelector('.pub').addEventListener('click', async () => {
+      const sharing = !t.public;
+      if (sharing && !confirm('Share "' + t.title + '" on your PUBLIC channel?\nAnyone with the channel link will be able to listen.')) return;
+      await api('/api/public', { name: t.name, on: sharing });
+      loadTracks();
+    });
     row.querySelector('.heart').addEventListener('click', async () => {
       await api('/api/heart', { name: t.name, on: !t.heart });
       loadTracks();
@@ -365,6 +374,25 @@ function playTrack(index) {
   startCurrent();
 }
 
+// play() can be refused while the phone is dozing — insist politely
+function playResilient(el) {
+  const p = el.play();
+  if (p && p.catch) p.catch(() => {
+    setTimeout(() => { el.play().catch(() => {}); }, 350);
+  });
+}
+
+// quietly buffer the next song so the handoff is instant (freeze-proof)
+const preloader = new Audio();
+preloader.preload = 'auto';
+function preloadNext() {
+  if (!queue.length || qPos < 0) return;
+  const n = tracks[queue[(qPos + 1) % queue.length]];
+  if (n && n.kind === 'audio' && preloader.src !== location.origin + n.url) {
+    preloader.src = n.url;
+  }
+}
+
 function startCurrent() {
   if (qPos < 0 || qPos >= queue.length) return;
   const t = tracks[queue[qPos]];
@@ -374,13 +402,14 @@ function startCurrent() {
   if (t.kind === 'video') {
     $('videoWrap').classList.add('show');
     video.src = t.url;
-    video.play();
+    playResilient(video);
   } else {
     $('videoWrap').classList.remove('show');
     video.removeAttribute('src');
     audio.src = t.url;
-    audio.play();
+    playResilient(audio);
   }
+  preloadNext();
   $('nowTitle').textContent = '♪ ' + t.title;
   highlightPlaying();
   updateMediaSession(t);
@@ -447,8 +476,14 @@ for (const el of [audio, video]) {
     }
   });
   el.addEventListener('ended', () => step(1));
-  el.addEventListener('play', () => { $('playBtn').textContent = '⏸'; });
-  el.addEventListener('pause', () => { $('playBtn').textContent = '▶'; });
+  el.addEventListener('play', () => {
+    $('playBtn').textContent = '⏸';
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  });
+  el.addEventListener('pause', () => {
+    $('playBtn').textContent = '▶';
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  });
 }
 
 // --- volume (remembered between visits) ---

@@ -62,6 +62,7 @@ const loginPage = (msg) => `<!DOCTYPE html><html><head>
   <button style="width:100%;margin-top:14px;padding:16px;font-size:1.1rem;font-weight:800;border:0;
     border-radius:14px;background:linear-gradient(135deg,#f0a35e,#e05c9c);color:#2a1020;cursor:pointer">
     Open my station</button>
+  <p style="margin-top:26px"><a href="/channel" style="color:#a894c9">🎧 Or visit the free public channel</a></p>
 </form></body></html>`;
 
 // --- rate limit code guesses: 8 tries per 15 minutes per visitor ---
@@ -86,10 +87,13 @@ app.post('/login', (req, res) => {
 });
 
 // --- auth: ?token= link, year-long cookie, or the /login form above ---
-// (app-install files are public: phones fetch them without the login cookie)
-const PUBLIC_FILES = new Set(['/manifest.webmanifest', '/sw.js', '/icon-512.png']);
+// (app-install files and the public channel are open: no login cookie needed)
+const PUBLIC_FILES = new Set([
+  '/manifest.webmanifest', '/manifest-channel.webmanifest', '/sw.js', '/icon-512.png',
+  '/channel', '/channel.html', '/api/channel',
+]);
 app.use((req, res, next) => {
-  if (PUBLIC_FILES.has(req.path)) return next();
+  if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/public-media/')) return next();
   const fromQuery = req.query.token;
   const cookieMatch = (req.headers.cookie || '').match(/(?:^|;\s*)radio=([^;]+)/);
   const fromCookie = cookieMatch ? cookieMatch[1] : null;
@@ -151,6 +155,7 @@ app.get('/api/tracks', (req, res) => {
         kind: VIDEO_EXT.has(ext) ? 'video' : 'audio',
         heart: !!m.heart,
         plays: m.plays || 0,
+        public: !!m.public,
       };
     })
     .sort((a, b) => {
@@ -162,6 +167,63 @@ app.get('/api/tracks', (req, res) => {
       return ra - rb;
     });
   res.json(files);
+});
+
+// --- the public channel: landing page, shared-track list, shared files ---
+app.get('/channel', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'channel.html'));
+});
+
+app.get('/api/channel', (req, res) => {
+  const rank = new Map(loadOrder().map((n, i) => [n, i]));
+  const meta = loadMeta();
+  const files = fs.readdirSync(MEDIA_DIR)
+    .filter((name) => allowedExt(name) && meta[name] && meta[name].public)
+    .map((name) => {
+      const st = fs.statSync(path.join(MEDIA_DIR, name));
+      const ext = path.extname(name).toLowerCase();
+      return {
+        name,
+        title: path.basename(name, ext).replace(/[_-]+/g, ' ').trim(),
+        url: '/public-media/' + encodeURIComponent(name),
+        size: st.size,
+        mtime: st.mtimeMs,
+        kind: VIDEO_EXT.has(ext) ? 'video' : 'audio',
+      };
+    })
+    .sort((a, b) => {
+      const ra = rank.has(a.name) ? rank.get(a.name) : null;
+      const rb = rank.has(b.name) ? rank.get(b.name) : null;
+      if (ra === null && rb === null) return b.mtime - a.mtime;
+      if (ra === null) return -1;
+      if (rb === null) return 1;
+      return ra - rb;
+    });
+  res.json(files);
+});
+
+// serves a media file ONLY if she has marked it public
+app.get('/public-media/:name', (req, res) => {
+  const name = path.basename(req.params.name);
+  const meta = loadMeta();
+  const full = path.join(MEDIA_DIR, name);
+  if (!allowedExt(name) || !(meta[name] && meta[name].public) || !fs.existsSync(full)) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.sendFile(full); // supports range requests for seeking
+});
+
+// --- share / unshare a track (behind auth: only she can do this) ---
+app.post('/api/public', (req, res) => {
+  const name = path.basename(String((req.body && req.body.name) || ''));
+  if (!allowedExt(name) || !fs.existsSync(path.join(MEDIA_DIR, name))) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  const meta = loadMeta();
+  meta[name] = meta[name] || {};
+  meta[name].public = !!req.body.on;
+  saveMeta(meta);
+  res.json({ ok: true, public: meta[name].public });
 });
 
 // --- heart / un-heart a track ---

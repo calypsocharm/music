@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1025">
+<meta name="description" content="Positivity & abundance music from Calypso — listen free.">
+<link rel="manifest" href="/manifest-channel.webmanifest">
+<link rel="icon" type="image/png" href="/icon-512.png">
+<link rel="apple-touch-icon" href="/icon-512.png">
+<title>Calypso Radio — free channel</title>
+<style>
+  :root {
+    --bg: #1a1025; --bg2: #241536; --card: #2d1b44; --card-hi: #3a2458;
+    --text: #f3ecff; --dim: #a894c9; --accent: #f0a35e; --accent2: #e05c9c;
+    --player-h: 150px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%);
+    min-height: 100vh; color: var(--text);
+  }
+  .hero { text-align: center; padding: max(env(safe-area-inset-top), 26px) 20px 8px; }
+  .hero .star { font-size: 3rem; color: var(--accent); }
+  h1 { margin: 6px 0 4px; font-size: 1.8rem; }
+  .tagline { color: var(--dim); margin: 0 0 16px; }
+  #installBtn {
+    display: none; margin: 0 auto 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #2a1020; font-weight: 800; border: 0; border-radius: 999px;
+    padding: 12px 26px; font-size: 1rem; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(224, 92, 156, .4);
+  }
+  .install-hint { color: var(--dim); font-size: .8rem; margin: 4px 20px 14px; text-align: center; }
+  #list { padding: 4px 12px calc(var(--player-h) + 30px); max-width: 560px; margin: 0 auto; }
+  .track {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--card); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
+    cursor: pointer; user-select: none;
+  }
+  .track.playing { background: var(--card-hi); outline: 2px solid var(--accent2); }
+  .track .art {
+    width: 42px; height: 42px; flex: none; border-radius: 10px;
+    background-size: cover; background-position: center;
+    display: grid; place-items: center; font-size: 1.1rem;
+  }
+  .track .info { flex: 1; min-width: 0; }
+  .track .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track .meta { color: var(--dim); font-size: .78rem; margin-top: 2px; }
+  #empty { text-align: center; color: var(--dim); padding: 50px 30px; line-height: 1.7; }
+  #player {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(26, 16, 37, .96); backdrop-filter: blur(14px);
+    border-top: 1px solid rgba(240, 163, 94, .25);
+    padding: 10px 16px calc(max(env(safe-area-inset-bottom), 10px));
+  }
+  #nowTitle {
+    text-align: center; font-weight: 600; font-size: .95rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px 6px;
+  }
+  #seekRow { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: var(--dim); }
+  #seek { flex: 1; accent-color: var(--accent2); height: 22px; }
+  #controls { display: flex; align-items: center; justify-content: center; gap: 14px; }
+  #controls button {
+    background: none; border: 0; color: var(--text); cursor: pointer;
+    font-size: 1.5rem; padding: 6px 10px; border-radius: 50%;
+  }
+  #playBtn {
+    background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
+    color: #2a1020 !important; width: 58px; height: 58px; font-size: 1.6rem !important;
+  }
+  #volRow { display: flex; align-items: center; gap: 8px; font-size: .85rem; padding: 0 24px; }
+  #vol { flex: 1; accent-color: var(--accent); height: 20px; }
+  footer { text-align: center; color: var(--dim); font-size: .78rem; padding: 10px 20px 20px; }
+  footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="star">✦</div>
+  <h1>Calypso Radio</h1>
+  <p class="tagline">Positivity &amp; abundance — listen free 🌻</p>
+  <button id="installBtn">📲 Get the app</button>
+  <div class="install-hint" id="installHint"></div>
+</div>
+
+<div id="list"></div>
+
+<div id="player">
+  <div id="nowTitle">Tap a track to start ✨</div>
+  <div id="seekRow">
+    <span id="tCur">0:00</span>
+    <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+    <span id="tDur">0:00</span>
+  </div>
+  <div id="controls">
+    <button id="prevBtn">⏮</button>
+    <button id="playBtn">▶</button>
+    <button id="nextBtn">⏭</button>
+  </div>
+  <div id="volRow"><span>🔈</span><input type="range" id="vol" min="0" max="100" value="100"><span>🔊</span></div>
+</div>
+
+<audio id="audio" preload="metadata"></audio>
+<footer><a href="/">owner sign-in</a></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+let tracks = [], pos = -1;
+
+const fmtTime = (s) => {
+  if (!isFinite(s)) return '0:00';
+  return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+};
+
+const coverCache = new Map();
+function coverFor(name, size) {
+  const key = name + '@' + size;
+  if (coverCache.has(key)) return coverCache.get(key);
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue1 = h % 360, hue2 = (hue1 + 50 + (h >> 4) % 90) % 360;
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, size, size);
+  g.addColorStop(0, 'hsl(' + hue1 + ' 48% 40%)');
+  g.addColorStop(1, 'hsl(' + hue2 + ' 55% 22%)');
+  x.fillStyle = g; x.fillRect(0, 0, size, size);
+  const rg = x.createRadialGradient(size * .68, size * .3, size * .04, size * .68, size * .3, size * .65);
+  rg.addColorStop(0, 'rgba(255,222,160,.45)'); rg.addColorStop(1, 'rgba(255,222,160,0)');
+  x.fillStyle = rg; x.fillRect(0, 0, size, size);
+  x.fillStyle = 'rgba(255,255,255,.92)';
+  x.font = 'bold ' + size * .46 + 'px serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('✦', size / 2, size * .55);
+  const url = c.toDataURL('image/png');
+  coverCache.set(key, url);
+  return url;
+}
+
+async function load() {
+  tracks = await (await fetch('/api/channel')).json();
+  const list = $('list');
+  list.innerHTML = '';
+  if (!tracks.length) {
+    list.innerHTML = '<div id="empty">🎧<br>Nothing shared yet — check back soon!</div>';
+    return;
+  }
+  tracks.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'track';
+    row.innerHTML = '<div class="art">' + (t.kind === 'video' ? '🎬' : '') + '</div>' +
+      '<div class="info"><div class="title"></div><div class="meta">' + t.kind + '</div></div>';
+    row.querySelector('.title').textContent = t.title;
+    row.querySelector('.art').style.backgroundImage = 'url(' + coverFor(t.name, 84) + ')';
+    row.addEventListener('click', () => play(i));
+    list.appendChild(row);
+  });
+}
+
+function play(i) {
+  pos = i;
+  const t = tracks[i];
+  audio.src = t.url;
+  audio.play();
+  $('nowTitle').textContent = '♪ ' + t.title;
+  document.querySelectorAll('.track').forEach((el, j) =>
+    el.classList.toggle('playing', j === i));
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t.title, artist: 'Calypso Radio',
+      artwork: [{ src: coverFor(t.name, 512), sizes: '512x512', type: 'image/png' }],
+    });
+    navigator.mediaSession.setActionHandler('play', () => audio.play());
+    navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+    navigator.mediaSession.setActionHandler('nexttrack', () => step(1));
+    navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
+  }
+}
+
+function step(d) {
+  if (!tracks.length) return;
+  play(((pos + d) % tracks.length + tracks.length) % tracks.length);
+}
+
+$('playBtn').addEventListener('click', () => {
+  if (!audio.src) { if (tracks.length) play(0); return; }
+  audio.paused ? audio.play() : audio.pause();
+});
+$('nextBtn').addEventListener('click', () => step(1));
+$('prevBtn').addEventListener('click', () => {
+  if (audio.currentTime > 4) audio.currentTime = 0; else step(-1);
+});
+audio.addEventListener('ended', () => step(1));
+audio.addEventListener('play', () => { $('playBtn').textContent = '⏸'; });
+audio.addEventListener('pause', () => { $('playBtn').textContent = '▶'; });
+
+let seeking = false;
+$('seek').addEventListener('input', () => { seeking = true; });
+$('seek').addEventListener('change', () => {
+  if (isFinite(audio.duration)) audio.currentTime = $('seek').value / 100 * audio.duration;
+  seeking = false;
+});
+audio.addEventListener('timeupdate', () => {
+  $('tCur').textContent = fmtTime(audio.currentTime);
+  $('tDur').textContent = fmtTime(audio.duration);
+  if (!seeking && isFinite(audio.duration)) $('seek').value = audio.currentTime / audio.duration * 100;
+});
+
+$('vol').addEventListener('input', () => { audio.volume = $('vol').value / 100; });
+
+// install button: real prompt when the browser offers one, gentle hint otherwise
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvent = e;
+  $('installBtn').style.display = 'inline-block';
+});
+$('installBtn').addEventListener('click', async () => {
+  if (installEvent) { installEvent.prompt(); installEvent = null; $('installBtn').style.display = 'none'; }
+});
+if (/iPhone|iPad/.test(navigator.userAgent)) {
+  $('installHint').textContent = 'On iPhone: tap Share, then "Add to Home Screen" to install';
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+load();
+</script>
+</body>
+</html>

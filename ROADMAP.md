@@ -25,5 +25,6 @@ Her note: the composer is cool but doesn't make *songs*. This is the
 11. **Auto MP3 compression on upload** (shrink big WAVs).
 
 ## 💰 The Calypso twist
-12. **Public channel** — mark a track public → shareable page; someday a free
-    "Abundance Sessions" sampler for Kickstarter backers.
+12. ~~**Public channel**~~ ✅ DONE 2026-07-12 — 🌍 button shares a track to
+    `/channel`: public landing page with player + install-app button. Only she
+    uploads; visitors only hear what she shares.
