@@ -14,7 +14,8 @@ Her note: the composer is cool but doesn't make *songs*. This is the
 
 ## 🎧 Better walks
 4. **Playlists** — "Morning Walk", "Sleep", etc.
-5. **Offline mode** — favorites cached on the phone; dead zones + zero data. ⭐
+5. ~~**Offline mode**~~ ✅ DONE 2026-07-12 — ❤️ hearted songs ARE the offline set;
+   toggle line in header, sw v2 with Range slicing, app shell opens offline.
 6. **Sleep timer** — fade out after 20/30/60 min.
 7. ~~**Crossfade**~~ ✅ DONE 2026-07-12 as "DJ mode" 🎚️ — 6s two-deck blend, toggle
    in the player, remembered between visits.
