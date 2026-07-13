@@ -152,6 +152,7 @@
 </header>
 <div class="sub" id="countLine">Your high-vibration station</div>
 <div class="sub" id="pinLine" style="display:none"></div>
+<div class="sub" id="offlineLine" style="display:none"></div>
 <div id="progressWrap"><div id="progressBar"></div></div>
 <div id="progressText"></div>
 
@@ -252,6 +253,7 @@ async function loadTracks() {
     qPos = i >= 0 ? queue.indexOf(i) : -1;
     highlightPlaying();
   }
+  if (offlineOn) syncOffline(); // hearts changed? keep the phone copies in step
 }
 
 // --- remember the spot: save every few seconds, offer to resume on return ---
@@ -663,6 +665,65 @@ loadTracks().then(restoreResume);
 
 // installable-app support
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// --- offline mode: ❤️ songs live on this phone ---
+const MEDIA_CACHE = 'radio-media-v1';
+let offlineOn = localStorage.getItem('offline') === '1';
+let offlineSyncing = false;
+
+async function renderOfflineStatus(busyText) {
+  if (!('caches' in window)) return;
+  const line = $('offlineLine');
+  line.style.display = 'block';
+  if (busyText) { line.textContent = busyText; return; }
+  if (!offlineOn) {
+    line.innerHTML = '📴 <a href="#" id="offToggle" style="color:var(--dim)">Offline mode off — tap to keep your ❤️ songs on this phone</a>';
+  } else {
+    const cache = await caches.open(MEDIA_CACHE);
+    const keys = await cache.keys();
+    let bytes = 0;
+    for (const req of keys) {
+      const res = await cache.match(req);
+      bytes += Number(res.headers.get('Content-Length') || 0);
+    }
+    line.innerHTML = '📴 <b>Offline on:</b> ' + keys.length + ' ❤️ song' +
+      (keys.length === 1 ? '' : 's') + ' saved on this phone (' +
+      (bytes / 1048576).toFixed(0) + ' MB) · <a href="#" id="offToggle" style="color:var(--accent)">turn off</a>';
+  }
+  document.getElementById('offToggle').addEventListener('click', async (e) => {
+    e.preventDefault();
+    offlineOn = !offlineOn;
+    localStorage.setItem('offline', offlineOn ? '1' : '0');
+    if (!offlineOn) await caches.delete(MEDIA_CACHE);
+    await renderOfflineStatus();
+    syncOffline();
+  });
+}
+
+async function syncOffline() {
+  if (!offlineOn || offlineSyncing || !('caches' in window)) return;
+  offlineSyncing = true;
+  try {
+    const cache = await caches.open(MEDIA_CACHE);
+    const want = tracks.filter((t) => t.heart && t.kind === 'audio');
+    const wantUrls = new Set(want.map((t) => new URL(t.url, location.href).href));
+    for (const req of await cache.keys()) {
+      if (!wantUrls.has(req.url)) await cache.delete(req); // un-hearted: tidy up
+    }
+    for (const t of want) {
+      const abs = new URL(t.url, location.href).href;
+      if (!(await cache.match(abs))) {
+        renderOfflineStatus('📴 Saving for offline… ♪ ' + t.title);
+        const res = await fetch(t.url);
+        if (res.ok) await cache.put(abs, res);
+      }
+    }
+  } catch (_) {}
+  offlineSyncing = false;
+  renderOfflineStatus();
+}
+
+renderOfflineStatus().then(syncOffline);
 
 // show the station passcode, with a way to pick your own
 function showPin(pin) {
