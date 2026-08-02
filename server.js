@@ -376,6 +376,49 @@ app.delete('/api/tracks/:name', (req, res) => {
   res.json({ deleted: name });
 });
 
+// --- walk mode: stream the whole station as one endless MP3 so the phone
+// never hits a song boundary behind the lock screen (good for walks) ---
+function walkAudioFiles() {
+  const rank = new Map(loadOrder().map((n, i) => [n, i]));
+  return fs.readdirSync(MEDIA_DIR)
+    .filter((name) => AUDIO_EXT.has(path.extname(name).toLowerCase()))
+    .map((name) => ({ name, mtime: fs.statSync(path.join(MEDIA_DIR, name)).mtimeMs }))
+    .sort((a, b) => {
+      const ra = rank.has(a.name) ? rank.get(a.name) : null;
+      const rb = rank.has(b.name) ? rank.get(b.name) : null;
+      if (ra === null && rb === null) return b.mtime - a.mtime;
+      if (ra === null) return -1;
+      if (rb === null) return 1;
+      return ra - rb;
+    })
+    .map((f) => f.name);
+}
+
+app.get('/api/walk', (req, res) => {
+  const list = walkAudioFiles();
+  if (!list.length) { res.status(204); return res.end(); }
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Accept-Ranges', 'none');
+  let alive = true;
+  res.on('close', () => { alive = false; });
+  (async () => {
+    while (alive) {
+      for (const name of list) {
+        if (!alive) break;
+        await new Promise((resolve) => {
+          const s = fs.createReadStream(path.join(MEDIA_DIR, name));
+          const done = () => { s.destroy(); resolve(); };
+          s.on('end', done);
+          s.on('error', done);
+          s.pipe(res, { end: false });
+        });
+      }
+    }
+    if (!res.writableEnded) res.end();
+  })();
+});
+
 app.listen(PORT, () => {
   console.log(`Calypso Radio on http://localhost:${PORT}/?token=${TOKEN}`);
   console.log(`Media folder: ${MEDIA_DIR}`);

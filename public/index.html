@@ -175,6 +175,7 @@
     <button id="nextBtn">⏭</button>
     <button class="mode" id="repeatBtn" title="Repeat all">🔁</button>
     <button class="mode" id="djBtn" title="DJ mode — songs fade into each other">🎚️</button>
+    <button class="mode" id="walkBtn" title="Walk mode — one endless stream that plays through the lock screen">🎧</button>
   </div>
   <div id="volRow">
     <span>🔈</span>
@@ -200,6 +201,7 @@ let audio = audioA;   // the "front turntable" — DJ mode swaps between A and B
 let fadeIv = null;    // running crossfade, if any
 let djMode = localStorage.getItem('dj') === '1';
 let badTok = 0, badSkips = 0;   // skip a failed track, but cap the streak
+let walkMode = false;  // one endless stream — plays through the lock screen
 
 let tracks = [];        // full list from server
 let queue = [];         // play order (indexes into tracks)
@@ -466,6 +468,7 @@ function startCurrent() {
 }
 
 function step(dir) {
+  if (walkMode) return;
   if (!queue.length) return;
   qPos += dir;
   if (qPos >= queue.length) {
@@ -599,6 +602,33 @@ $('djBtn').addEventListener('click', () => {
   localStorage.setItem('dj', djMode ? '1' : '0');
   $('djBtn').classList.toggle('on', djMode);
 });
+
+// --- walk mode: one endless stream so playback never breaks at a song
+// edge behind the lock screen (the phone sees a single long track) ---
+function setWalk(on) {
+  walkMode = on;
+  $('walkBtn').classList.toggle('on', walkMode);
+  cancelFade();
+  if (walkMode) {
+    audioA.pause(); audioB.pause(); video.pause();
+    $('videoWrap').classList.remove('show');
+    audio = audioA;
+    audioA.src = '/api/walk';
+    $('nowTitle').textContent = '🎧 Walk mode — nonstop, plays through the lock screen';
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'Walk Mode', artist: 'Calypso Radio' });
+    }
+    playResilient(audioA);
+  } else {
+    audioA.pause(); audioA.removeAttribute('src'); audioA.load();
+    if (currentName) {
+      const i = tracks.findIndex((t) => t.name === currentName);
+      qPos = i >= 0 ? queue.indexOf(i) : -1;
+    }
+    loadTracks();
+  }
+}
+$('walkBtn').addEventListener('click', () => setWalk(!walkMode));
 
 // --- volume (remembered between visits) ---
 const savedVol = localStorage.getItem('vol');
@@ -815,6 +845,24 @@ function resumeAfterHidden() {
   wasPlayingBeforeHidden = false;
 }
 window.addEventListener('pageshow', resumeAfterHidden);
+
+// pause when an earbud comes out, so a dropped bud doesn't blast the phone
+let lastOutCount = -1;
+function checkEarbuds() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  navigator.mediaDevices.enumerateDevices().then((ds) => {
+    const out = ds.filter((d) => d.kind === 'audiooutput').length;
+    if (lastOutCount >= 0 && out < lastOutCount) {
+      const el = activeEl();
+      if (el && el.src && !el.paused) el.pause();
+    }
+    lastOutCount = out;
+  }).catch(() => {});
+}
+if (navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener('devicechange', checkEarbuds);
+  checkEarbuds();
+}
 </script>
 </body>
 </html>
