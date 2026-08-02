@@ -199,6 +199,7 @@ const audioA = $('audio'), audioB = $('audioB'), video = $('video');
 let audio = audioA;   // the "front turntable" — DJ mode swaps between A and B
 let fadeIv = null;    // running crossfade, if any
 let djMode = localStorage.getItem('dj') === '1';
+let badTok = 0, badSkips = 0;   // skip a failed track, but cap the streak
 
 let tracks = [];        // full list from server
 let queue = [];         // play order (indexes into tracks)
@@ -430,10 +431,19 @@ function preloadNext() {
   }
 }
 
+// skip a track that errored, but stop after several in a row so a bad stretch
+// can't fast-forward through the whole library
+function skipBad() {
+  if (badSkips >= 6) { $('nowTitle').textContent = '♪ Trouble playing — tap a track to retry'; return; }
+  badSkips++;
+  step(1);
+}
+
 function startCurrent() {
   if (qPos < 0 || qPos >= queue.length) return;
   const t = tracks[queue[qPos]];
   currentName = t.name;
+  badTok++;          // any pending "this track is bad" timer is now stale
   cancelFade();
   video.pause();
   audioA.pause();
@@ -520,6 +530,13 @@ for (const el of [audioA, audioB, video]) {
     }
   });
   el.addEventListener('ended', () => { if (el === activeEl()) step(1); });
+  // a track that fails to load shouldn't end the walk — skip it (capped)
+  el.addEventListener('error', () => {
+    if (el !== activeEl() || !el.src) return;
+    const tok = badTok;
+    setTimeout(() => { if (tok === badTok && el === activeEl() && el.paused) skipBad(); }, 1200);
+  });
+  el.addEventListener('play', () => { if (el === activeEl()) badSkips = 0; });
   el.addEventListener('play', () => {
     if (el !== activeEl()) return;
     $('playBtn').textContent = '⏸';
@@ -776,9 +793,28 @@ async function checkVersion() {
   } catch (_) {}
 }
 setInterval(checkVersion, 10 * 60 * 1000);
+let wasPlayingBeforeHidden = false;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') checkVersion();
+  if (document.visibilityState === 'visible') {
+    checkVersion();
+    resumeAfterHidden();
+  } else {
+    const el = activeEl();
+    wasPlayingBeforeHidden = !!(el && el.src && !el.paused);
+  }
 });
+
+// the phone pauses our JS (and sometimes the audio) while the screen is off;
+// on wake, either pick up a track that finished quietly, or resume one the OS
+// paused mid-song — so the walk doesn't go silent behind the lock screen
+function resumeAfterHidden() {
+  const el = activeEl();
+  if (!el || !el.src || !isFinite(el.duration)) { wasPlayingBeforeHidden = false; return; }
+  if (el.currentTime >= el.duration - 0.5) { wasPlayingBeforeHidden = false; step(1); return; }
+  if (wasPlayingBeforeHidden && el.paused) { wasPlayingBeforeHidden = false; playResilient(el); }
+  wasPlayingBeforeHidden = false;
+}
+window.addEventListener('pageshow', resumeAfterHidden);
 </script>
 </body>
 </html>
