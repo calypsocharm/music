@@ -47,6 +47,9 @@
   }
   .track .info { flex: 1; min-width: 0; }
   .track .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track .dl { flex: 0 0 auto; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--dim); text-decoration: none; font-size: 1.05rem; }
+  .track .dl:hover { background: var(--card-hi); color: #fff; }
+  .section { color: var(--dim); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; margin: 18px 8px 6px; }
   .track .meta { color: var(--dim); font-size: .78rem; margin-top: 2px; }
   #empty { text-align: center; color: var(--dim); padding: 50px 30px; line-height: 1.7; }
   #player {
@@ -102,19 +105,27 @@
   <div id="volRow"><span>🔈</span><input type="range" id="vol" min="0" max="100" value="100"><span>🔊</span></div>
 </div>
 
-<audio id="audio" preload="metadata"></audio>
+<audio id="audio" preload="auto"></audio>
 <footer><a href="/">owner sign-in</a></footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
-let tracks = [], pos = -1;
-
+// Why this got a rewrite (2026-09-03): on a phone the channel would play a couple of
+// songs and go quiet. Three causes, all handled here:
+//  1. audio.play() on the next track can be REJECTED when the tab is in the background
+//     (screen off, phone in a pocket). Nothing caught it, so the player just stopped.
+//  2. A 251 MB video sat in the audio queue. One <audio> element trying to stream it on
+//     cellular stalled, and there was no error handler to move on.
+//  3. Nothing was preloaded, so every track change was a silent gap - Android drops the
+//     media notification in that gap and may suspend the tab.
+let tracks = [], videos = [], pos = -1;
+let wantPlaying = false;       // she pressed play and has not pressed pause
+let consecutiveErrors = 0;
 const fmtTime = (s) => {
   if (!isFinite(s)) return '0:00';
   return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 };
-
 const coverCache = new Map();
 function coverFor(name, size) {
   const key = name + '@' + size;
@@ -139,64 +150,133 @@ function coverFor(name, size) {
   coverCache.set(key, url);
   return url;
 }
-
+function fmtSize(b) { return (b / 1048576).toFixed(1) + ' MB'; }
+function row(t, i) {
+  const el = document.createElement('div');
+  el.className = 'track';
+  el.innerHTML = '<div class="art">' + (t.kind === 'video' ? '🎬' : '') + '</div>' +
+    '<div class="info"><div class="title"></div><div class="meta"></div></div>' +
+    '<a class="dl" title="Download" aria-label="Download">⬇</a>';
+  el.querySelector('.title').textContent = t.title;
+  el.querySelector('.meta').textContent = (t.kind === 'video' ? 'video' : 'song') + ' · ' + fmtSize(t.size);
+  el.querySelector('.art').style.backgroundImage = 'url(' + coverFor(t.name, 84) + ')';
+  const dl = el.querySelector('.dl');
+  dl.href = t.url;
+  dl.setAttribute('download', t.name);
+  dl.addEventListener('click', (e) => e.stopPropagation());
+  if (t.kind === 'video') {
+    // videos open on their own; they are never queued into the music player
+    el.addEventListener('click', () => window.open(t.url, '_blank', 'noopener'));
+  } else {
+    el.addEventListener('click', () => { wantPlaying = true; play(i); });
+  }
+  return el;
+}
 async function load() {
-  tracks = await (await fetch('/api/channel')).json();
+  const all = await (await fetch('/api/channel')).json();
+  tracks = all.filter((t) => t.kind === 'audio');
+  videos = all.filter((t) => t.kind === 'video');
   const list = $('list');
   list.innerHTML = '';
-  if (!tracks.length) {
+  if (!all.length) {
     list.innerHTML = '<div id="empty">🎧<br>Nothing shared yet — check back soon!</div>';
     return;
   }
-  tracks.forEach((t, i) => {
-    const row = document.createElement('div');
-    row.className = 'track';
-    row.innerHTML = '<div class="art">' + (t.kind === 'video' ? '🎬' : '') + '</div>' +
-      '<div class="info"><div class="title"></div><div class="meta">' + t.kind + '</div></div>';
-    row.querySelector('.title').textContent = t.title;
-    row.querySelector('.art').style.backgroundImage = 'url(' + coverFor(t.name, 84) + ')';
-    row.addEventListener('click', () => play(i));
-    list.appendChild(row);
-  });
-}
-
-function play(i) {
-  pos = i;
-  const t = tracks[i];
-  audio.src = t.url;
-  audio.play();
-  $('nowTitle').textContent = '♪ ' + t.title;
-  document.querySelectorAll('.track').forEach((el, j) =>
-    el.classList.toggle('playing', j === i));
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: t.title, artist: 'Calypso Radio',
-      artwork: [{ src: coverFor(t.name, 512), sizes: '512x512', type: 'image/png' }],
-    });
-    navigator.mediaSession.setActionHandler('play', () => audio.play());
-    navigator.mediaSession.setActionHandler('pause', () => audio.pause());
-    navigator.mediaSession.setActionHandler('nexttrack', () => step(1));
-    navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
+  tracks.forEach((t, i) => list.appendChild(row(t, i)));
+  if (videos.length) {
+    const h = document.createElement('div');
+    h.className = 'section';
+    h.textContent = 'Videos';
+    list.appendChild(h);
+    videos.forEach((t) => list.appendChild(row(t, -1)));
   }
 }
-
+// The next song is fetched while this one plays, so the hand-off is instant and
+// the phone never sees a silent gap.
+const preloader = new Audio();
+preloader.preload = 'auto';
+function preloadNext() {
+  if (tracks.length < 2) return;
+  const n = tracks[(pos + 1) % tracks.length];
+  const want = location.origin + n.url;
+  if (preloader.src !== want) preloader.src = want;
+}
+function setSession(t) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: t.title, artist: 'Calypso Radio',
+    artwork: [{ src: coverFor(t.name, 512), sizes: '512x512', type: 'image/png' }],
+  });
+  navigator.mediaSession.setActionHandler('play', () => { wantPlaying = true; audio.play().catch(() => {}); });
+  navigator.mediaSession.setActionHandler('pause', () => { wantPlaying = false; audio.pause(); });
+  navigator.mediaSession.setActionHandler('nexttrack', () => step(1));
+  navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
+}
+function tryPlay() {
+  const p = audio.play();
+  if (p && p.catch) p.catch(() => {
+    // Rejected (usually: tab in the background). Try once more shortly, then wait
+    // for the next moment we are allowed - the tab becoming visible, or any tap.
+    setTimeout(() => { if (wantPlaying && audio.paused) audio.play().catch(() => {}); }, 400);
+  });
+}
+function play(i) {
+  if (!tracks.length) return;
+  pos = ((i % tracks.length) + tracks.length) % tracks.length;
+  const t = tracks[pos];
+  audio.src = t.url;
+  setSession(t);
+  tryPlay();
+  $('nowTitle').textContent = '♪ ' + t.title;
+  document.querySelectorAll('.track').forEach((el, j) => el.classList.toggle('playing', j === pos));
+  preloadNext();
+}
 function step(d) {
   if (!tracks.length) return;
-  play(((pos + d) % tracks.length + tracks.length) % tracks.length);
+  play(pos + d);
 }
-
 $('playBtn').addEventListener('click', () => {
-  if (!audio.src) { if (tracks.length) play(0); return; }
-  audio.paused ? audio.play() : audio.pause();
+  if (!audio.src) { if (tracks.length) { wantPlaying = true; play(0); } return; }
+  if (audio.paused) { wantPlaying = true; tryPlay(); } else { wantPlaying = false; audio.pause(); }
 });
 $('nextBtn').addEventListener('click', () => step(1));
 $('prevBtn').addEventListener('click', () => {
   if (audio.currentTime > 4) audio.currentTime = 0; else step(-1);
 });
-audio.addEventListener('ended', () => step(1));
-audio.addEventListener('play', () => { $('playBtn').textContent = '⏸'; });
-audio.addEventListener('pause', () => { $('playBtn').textContent = '▶'; });
-
+audio.addEventListener('ended', () => { consecutiveErrors = 0; step(1); });
+// A track that will not load must not end the session: move on, but never loop
+// forever through a whole broken list.
+audio.addEventListener('error', () => {
+  consecutiveErrors++;
+  if (wantPlaying && consecutiveErrors < tracks.length) setTimeout(() => step(1), 600);
+});
+audio.addEventListener('play', () => {
+  $('playBtn').textContent = '⏸';
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+});
+audio.addEventListener('pause', () => {
+  $('playBtn').textContent = '▶';
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+});
+// Stuck buffering for too long (bad signal): reload the same track from where it was.
+let waitTimer = null;
+audio.addEventListener('waiting', () => {
+  clearTimeout(waitTimer);
+  waitTimer = setTimeout(() => {
+    if (!wantPlaying || audio.readyState >= 3) return;
+    const at = audio.currentTime;
+    audio.load();
+    audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = at; } catch (e) {} tryPlay(); }, { once: true });
+  }, 20000);
+});
+audio.addEventListener('playing', () => { consecutiveErrors = 0; clearTimeout(waitTimer); });
+// Back in the foreground, or any tap: if she wanted music and it stopped, resume.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wantPlaying && audio.paused && audio.src) tryPlay();
+});
+document.addEventListener('click', () => {
+  if (wantPlaying && audio.paused && audio.src && !audio.ended) tryPlay();
+}, true);
 let seeking = false;
 $('seek').addEventListener('input', () => { seeking = true; });
 $('seek').addEventListener('change', () => {
@@ -208,9 +288,7 @@ audio.addEventListener('timeupdate', () => {
   $('tDur').textContent = fmtTime(audio.duration);
   if (!seeking && isFinite(audio.duration)) $('seek').value = audio.currentTime / audio.duration * 100;
 });
-
 $('vol').addEventListener('input', () => { audio.volume = $('vol').value / 100; });
-
 // install button: real prompt when the browser offers one, gentle hint otherwise
 let installEvent = null;
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -225,7 +303,6 @@ if (/iPhone|iPad/.test(navigator.userAgent)) {
   $('installHint').textContent = 'On iPhone: tap Share, then "Add to Home Screen" to install';
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-
 load();
 </script>
 </body>
