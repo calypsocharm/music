@@ -58,10 +58,15 @@
     border-top: 1px solid rgba(240, 163, 94, .25);
     padding: 10px 16px calc(max(env(safe-area-inset-bottom), 10px));
   }
-  #nowTitle {
-    text-align: center; font-weight: 600; font-size: .95rem;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px 6px;
+  #nowRow { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 6px 6px; }
+  #liveBadge {
+    display: none; flex: none; font-size: .68rem; font-weight: 800; letter-spacing: .08em;
+    padding: 3px 8px; border-radius: 999px; background: #c8264f; color: #fff;
   }
+  #liveBadge.on { display: inline-block; }
+  #liveBadge.on::before { content: "● "; animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  #nowTitle { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #seekRow { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: var(--dim); }
   #seek { flex: 1; accent-color: var(--accent2); height: 22px; }
   #controls { display: flex; align-items: center; justify-content: center; gap: 14px; }
@@ -73,6 +78,9 @@
     background: linear-gradient(135deg, var(--accent), var(--accent2)) !important;
     color: #2a1020 !important; width: 58px; height: 58px; font-size: 1.6rem !important;
   }
+  #liveBtn { font-size: .8rem !important; font-weight: 700; color: var(--accent) !important; border-radius: 999px !important; padding: 6px 12px !important; display: none; }
+  #liveBtn.show { display: inline-block; }
+  #status { text-align: center; color: var(--dim); font-size: .74rem; min-height: 1.1em; padding-top: 2px; }
   #volRow { display: flex; align-items: center; gap: 8px; font-size: .85rem; padding: 0 24px; }
   #vol { flex: 1; accent-color: var(--accent); height: 20px; }
   footer { text-align: center; color: var(--dim); font-size: .78rem; padding: 10px 20px 20px; }
@@ -91,39 +99,42 @@
 <div id="list"></div>
 
 <div id="player">
-  <div id="nowTitle">Tap a track to start ✨</div>
+  <div id="nowRow"><span id="liveBadge">LIVE</span><span id="nowTitle">Tap play to tune in ✨</span></div>
   <div id="seekRow">
     <span id="tCur">0:00</span>
     <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
     <span id="tDur">0:00</span>
   </div>
   <div id="controls">
-    <button id="prevBtn">⏮</button>
+    <button id="liveBtn" title="Back to the live station">◉ Live</button>
     <button id="playBtn">▶</button>
-    <button id="nextBtn">⏭</button>
   </div>
+  <div id="status"></div>
   <div id="volRow"><span>🔈</span><input type="range" id="vol" min="0" max="100" value="100"><span>🔊</span></div>
 </div>
 
-<audio id="audio" preload="auto"></audio>
+<audio id="audio" preload="none"></audio>
 <footer><a href="/">owner sign-in</a></footer>
 
 <script>
+// How this player works (2026-09-14):
+// The station is ONE endless MP3 stream from the server (/radio.mp3). The browser opens it
+// once and keeps receiving music, so there is never a song boundary for the phone to trip
+// on. Earlier versions loaded songs one at a time and Android kept killing playback at the
+// hand-off once the screen was off - two rounds of patching that did not cure it.
+// Tapping a song still plays just that song (foreground use); when it ends, back to live.
 const $ = (id) => document.getElementById(id);
 const audio = $('audio');
-// Why this got a rewrite (2026-09-03): on a phone the channel would play a couple of
-// songs and go quiet. Three causes, all handled here:
-//  1. audio.play() on the next track can be REJECTED when the tab is in the background
-//     (screen off, phone in a pocket). Nothing caught it, so the player just stopped.
-//  2. A 251 MB video sat in the audio queue. One <audio> element trying to stream it on
-//     cellular stalled, and there was no error handler to move on.
-//  3. Nothing was preloaded, so every track change was a silent gap - Android drops the
-//     media notification in that gap and may suspend the tab.
-let tracks = [], videos = [], pos = -1;
-let wantPlaying = false;       // she pressed play and has not pressed pause
-let consecutiveErrors = 0;
+const STREAM = '/radio.mp3';
+let tracks = [], videos = [];
+let wantPlaying = false;     // she pressed play and has not pressed pause
+let mode = 'live';           // 'live' (the stream) or 'single' (one tapped song)
+let singlePos = -1;
+let now = null;              // last /api/now-playing answer
+let nowAt = 0;               // when it was fetched
+let retries = 0;
 const fmtTime = (s) => {
-  if (!isFinite(s)) return '0:00';
+  if (!isFinite(s) || s < 0) return '0:00';
   return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 };
 const coverCache = new Map();
@@ -154,6 +165,7 @@ function fmtSize(b) { return (b / 1048576).toFixed(1) + ' MB'; }
 function row(t, i) {
   const el = document.createElement('div');
   el.className = 'track';
+  el.dataset.name = t.name;
   el.innerHTML = '<div class="art">' + (t.kind === 'video' ? '🎬' : '') + '</div>' +
     '<div class="info"><div class="title"></div><div class="meta"></div></div>' +
     '<a class="dl" title="Download" aria-label="Download">⬇</a>';
@@ -165,10 +177,10 @@ function row(t, i) {
   dl.setAttribute('download', t.name);
   dl.addEventListener('click', (e) => e.stopPropagation());
   if (t.kind === 'video') {
-    // videos open on their own; they are never queued into the music player
+    // videos open on their own; they are never part of the station
     el.addEventListener('click', () => window.open(t.url, '_blank', 'noopener'));
   } else {
-    el.addEventListener('click', () => { wantPlaying = true; play(i); });
+    el.addEventListener('click', () => playSingle(i));
   }
   return el;
 }
@@ -191,65 +203,123 @@ async function load() {
     videos.forEach((t) => list.appendChild(row(t, -1)));
   }
 }
-// The next song is fetched while this one plays, so the hand-off is instant and
-// the phone never sees a silent gap.
-const preloader = new Audio();
-preloader.preload = 'auto';
-function preloadNext() {
-  if (tracks.length < 2) return;
-  const n = tracks[(pos + 1) % tracks.length];
-  const want = location.origin + n.url;
-  if (preloader.src !== want) preloader.src = want;
+function markPlaying(name) {
+  document.querySelectorAll('.track').forEach((el) => el.classList.toggle('playing', !!name && el.dataset.name === name));
 }
-function setSession(t) {
+function setSession(title) {
   if (!('mediaSession' in navigator)) return;
   navigator.mediaSession.metadata = new MediaMetadata({
-    title: t.title, artist: 'Calypso Radio',
-    artwork: [{ src: coverFor(t.name, 512), sizes: '512x512', type: 'image/png' }],
+    title: title || 'Calypso Radio', artist: 'Calypso Radio',
+    artwork: [{ src: coverFor(title || 'radio', 512), sizes: '512x512', type: 'image/png' }],
   });
-  navigator.mediaSession.setActionHandler('play', () => { wantPlaying = true; audio.play().catch(() => {}); });
-  navigator.mediaSession.setActionHandler('pause', () => { wantPlaying = false; audio.pause(); });
-  navigator.mediaSession.setActionHandler('nexttrack', () => step(1));
-  navigator.mediaSession.setActionHandler('previoustrack', () => step(-1));
+  navigator.mediaSession.setActionHandler('play', () => userPlay());
+  navigator.mediaSession.setActionHandler('pause', () => userPause());
+  try { navigator.mediaSession.setActionHandler('nexttrack', null); } catch (e) {}
+  try { navigator.mediaSession.setActionHandler('previoustrack', null); } catch (e) {}
 }
-function tryPlay() {
+function status(msg) { $('status').textContent = msg || ''; }
+
+// --- the live station ---
+function tuneIn() {
+  mode = 'live'; singlePos = -1;
+  $('liveBadge').classList.add('on');
+  $('liveBtn').classList.remove('show');
+  $('seek').disabled = true;
+  markPlaying(now && now.name);
+  $('nowTitle').textContent = now && now.title ? '♪ ' + now.title : 'Tuning in…';
+  // a fresh connection every time: a paused live stream is stale, so never resume it
+  audio.src = STREAM + '?t=' + Date.now();
+  audio.load();
   const p = audio.play();
-  if (p && p.catch) p.catch(() => {
-    // Rejected (usually: tab in the background). Try once more shortly, then wait
-    // for the next moment we are allowed - the tab becoming visible, or any tap.
-    setTimeout(() => { if (wantPlaying && audio.paused) audio.play().catch(() => {}); }, 400);
-  });
+  if (p && p.catch) p.catch(() => { status('Tap play to start'); });
+  setSession(now && now.title);
+  refreshNow(true);
 }
-function play(i) {
+async function refreshNow(force) {
+  if (mode !== 'live') return;
+  if (!force && document.visibilityState !== 'visible') return;
+  try {
+    const r = await fetch('/api/now-playing', { cache: 'no-store' });
+    if (!r.ok) return;
+    now = await r.json(); nowAt = Date.now();
+    if (now.title) {
+      $('nowTitle').textContent = '♪ ' + now.title;
+      markPlaying(now.name);
+      setSession(now.title);
+    }
+  } catch (e) {}
+}
+setInterval(() => refreshNow(false), 10000);
+// progress bar for the live song, from the server clock (nudged locally between polls)
+setInterval(() => {
+  if (mode !== 'live' || !now || !now.duration) return;
+  const elapsed = Math.min(now.duration, now.elapsed + (Date.now() - nowAt) / 1000);
+  $('tCur').textContent = fmtTime(elapsed);
+  $('tDur').textContent = fmtTime(now.duration);
+  $('seek').value = elapsed / now.duration * 100;
+  if (elapsed >= now.duration - 0.5) refreshNow(true);
+}, 1000);
+
+// --- one tapped song (foreground use) ---
+function playSingle(i) {
   if (!tracks.length) return;
-  pos = ((i % tracks.length) + tracks.length) % tracks.length;
-  const t = tracks[pos];
-  audio.src = t.url;
-  setSession(t);
-  tryPlay();
+  mode = 'single';
+  singlePos = ((i % tracks.length) + tracks.length) % tracks.length;
+  const t = tracks[singlePos];
+  wantPlaying = true;
+  $('liveBadge').classList.remove('on');
+  $('liveBtn').classList.add('show');
+  $('seek').disabled = false;
   $('nowTitle').textContent = '♪ ' + t.title;
-  document.querySelectorAll('.track').forEach((el, j) => el.classList.toggle('playing', j === pos));
-  preloadNext();
+  markPlaying(t.name);
+  audio.src = t.url;
+  audio.load();
+  const p = audio.play();
+  if (p && p.catch) p.catch(() => {});
+  setSession(t.title);
+  status('Playing this song only · tap Live to return to the station');
 }
-function step(d) {
-  if (!tracks.length) return;
-  play(pos + d);
+
+function userPlay() {
+  wantPlaying = true; retries = 0; status('');
+  if (mode === 'single' && audio.src && audio.paused && !audio.ended) { audio.play().catch(() => {}); return; }
+  tuneIn();
 }
-$('playBtn').addEventListener('click', () => {
-  if (!audio.src) { if (tracks.length) { wantPlaying = true; play(0); } return; }
-  if (audio.paused) { wantPlaying = true; tryPlay(); } else { wantPlaying = false; audio.pause(); }
+function userPause() {
+  wantPlaying = false;
+  audio.pause();
+  if (mode === 'live') { audio.removeAttribute('src'); audio.load(); } // drop the connection
+}
+$('playBtn').addEventListener('click', () => { if (audio.paused) userPlay(); else userPause(); });
+$('liveBtn').addEventListener('click', () => { wantPlaying = true; tuneIn(); });
+
+// --- keep it going ---
+// The stream dropped (bad signal, tab restored after a freeze, a rejected play()): reconnect,
+// backing off a little each time, as long as she still wants music.
+let reconnectTimer = null;
+function reconnect(why) {
+  if (!wantPlaying || mode !== 'live') return;
+  clearTimeout(reconnectTimer);
+  const wait = Math.min(15000, 800 * Math.pow(2, retries++));
+  status('Reconnecting…');
+  reconnectTimer = setTimeout(() => { if (wantPlaying && mode === 'live') tuneIn(); }, wait);
+}
+audio.addEventListener('ended', () => {
+  if (mode === 'single') { wantPlaying = true; tuneIn(); }   // back to the station
+  else reconnect('ended');                                    // a live stream should never end
 });
-$('nextBtn').addEventListener('click', () => step(1));
-$('prevBtn').addEventListener('click', () => {
-  if (audio.currentTime > 4) audio.currentTime = 0; else step(-1);
-});
-audio.addEventListener('ended', () => { consecutiveErrors = 0; step(1); });
-// A track that will not load must not end the session: move on, but never loop
-// forever through a whole broken list.
-audio.addEventListener('error', () => {
-  consecutiveErrors++;
-  if (wantPlaying && consecutiveErrors < tracks.length) setTimeout(() => step(1), 600);
-});
+audio.addEventListener('error', () => { if (mode === 'live') reconnect('error'); });
+audio.addEventListener('stalled', () => { if (mode === 'live') stallWatch(); });
+audio.addEventListener('waiting', () => { if (mode === 'live') stallWatch(); });
+let stallTimer = null, lastTime = -1;
+function stallWatch() {
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => {
+    if (wantPlaying && mode === 'live' && audio.currentTime === lastTime) reconnect('stall');
+  }, 15000);
+  lastTime = audio.currentTime;
+}
+audio.addEventListener('playing', () => { retries = 0; status(''); clearTimeout(stallTimer); clearTimeout(reconnectTimer); });
 audio.addEventListener('play', () => {
   $('playBtn').textContent = '⏸';
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
@@ -257,36 +327,28 @@ audio.addEventListener('play', () => {
 audio.addEventListener('pause', () => {
   $('playBtn').textContent = '▶';
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  // paused by the system (a call, another app grabbing audio): come back once it is over
+  if (wantPlaying && mode === 'live') setTimeout(() => { if (wantPlaying && audio.paused) reconnect('system pause'); }, 3000);
 });
-// Stuck buffering for too long (bad signal): reload the same track from where it was.
-let waitTimer = null;
-audio.addEventListener('waiting', () => {
-  clearTimeout(waitTimer);
-  waitTimer = setTimeout(() => {
-    if (!wantPlaying || audio.readyState >= 3) return;
-    const at = audio.currentTime;
-    audio.load();
-    audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = at; } catch (e) {} tryPlay(); }, { once: true });
-  }, 20000);
+audio.addEventListener('timeupdate', () => {
+  if (mode !== 'single') return;
+  $('tCur').textContent = fmtTime(audio.currentTime);
+  $('tDur').textContent = fmtTime(audio.duration);
+  if (!seeking && isFinite(audio.duration)) $('seek').value = audio.currentTime / audio.duration * 100;
 });
-audio.addEventListener('playing', () => { consecutiveErrors = 0; clearTimeout(waitTimer); });
-// Back in the foreground, or any tap: if she wanted music and it stopped, resume.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && wantPlaying && audio.paused && audio.src) tryPlay();
+  if (document.visibilityState !== 'visible') return;
+  refreshNow(true);
+  if (wantPlaying && audio.paused) { retries = 0; if (mode === 'live') tuneIn(); else audio.play().catch(() => {}); }
 });
 document.addEventListener('click', () => {
-  if (wantPlaying && audio.paused && audio.src && !audio.ended) tryPlay();
+  if (wantPlaying && audio.paused && !reconnectTimer) { if (mode === 'live') tuneIn(); else audio.play().catch(() => {}); }
 }, true);
 let seeking = false;
 $('seek').addEventListener('input', () => { seeking = true; });
 $('seek').addEventListener('change', () => {
-  if (isFinite(audio.duration)) audio.currentTime = $('seek').value / 100 * audio.duration;
+  if (mode === 'single' && isFinite(audio.duration)) audio.currentTime = $('seek').value / 100 * audio.duration;
   seeking = false;
-});
-audio.addEventListener('timeupdate', () => {
-  $('tCur').textContent = fmtTime(audio.currentTime);
-  $('tDur').textContent = fmtTime(audio.duration);
-  if (!seeking && isFinite(audio.duration)) $('seek').value = audio.currentTime / audio.duration * 100;
 });
 $('vol').addEventListener('input', () => { audio.volume = $('vol').value / 100; });
 // install button: real prompt when the browser offers one, gentle hint otherwise
@@ -303,7 +365,9 @@ if (/iPhone|iPad/.test(navigator.userAgent)) {
   $('installHint').textContent = 'On iPhone: tap Share, then "Add to Home Screen" to install';
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-load();
+$('seek').disabled = true;
+$('liveBadge').classList.add('on');
+load().then(() => refreshNow(true));
 </script>
 </body>
 </html>

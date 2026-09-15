@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const { createRadio } = require('./radio');
 
 const PORT = process.env.PORT || 8300;
 const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, 'media');
@@ -91,7 +92,7 @@ app.post('/login', (req, res) => {
 // (app-install files and the public channel are open: no login cookie needed)
 const PUBLIC_FILES = new Set([
   '/manifest.webmanifest', '/manifest-channel.webmanifest', '/sw.js', '/icon-512.png',
-  '/channel', '/channel.html', '/api/channel',
+  '/channel', '/channel.html', '/api/channel', '/radio.mp3', '/api/now-playing',
 ]);
 app.use((req, res, next) => {
   if (PUBLIC_FILES.has(req.path) || req.path.startsWith('/public-media/')) return next();
@@ -177,6 +178,37 @@ app.get('/api/tracks', (req, res) => {
 // --- the public channel: landing page, shared-track list, shared files ---
 app.get('/channel', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'channel.html'));
+});
+
+// Shared files in her order (the list /api/channel shows and the live station plays).
+function publicFiles() {
+  const rank = new Map(loadOrder().map((n, i) => [n, i]));
+  const meta = loadMeta();
+  return fs.readdirSync(MEDIA_DIR)
+    .filter((name) => allowedExt(name) && meta[name] && meta[name].public)
+    .map((name) => ({ name, mtime: fs.statSync(path.join(MEDIA_DIR, name)).mtimeMs }))
+    .sort((a, b) => {
+      const ra = rank.has(a.name) ? rank.get(a.name) : null;
+      const rb = rank.has(b.name) ? rank.get(b.name) : null;
+      if (ra === null && rb === null) return b.mtime - a.mtime;
+      if (ra === null) return -1;
+      if (rb === null) return 1;
+      return ra - rb;
+    })
+    .map((f) => f.name);
+}
+
+// The live station (see radio.js): one endless MP3 of the shared songs, no boundaries.
+const radio = createRadio({
+  mediaDir: MEDIA_DIR,
+  listFiles: () => publicFiles().filter((name) => AUDIO_EXT.has(path.extname(name).toLowerCase())),
+  ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
+  ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
+});
+app.get('/radio.mp3', (req, res) => radio.addListener(req, res));
+app.get('/api/now-playing', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(radio.nowPlaying());
 });
 
 app.get('/api/channel', (req, res) => {
