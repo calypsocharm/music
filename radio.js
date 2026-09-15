@@ -13,13 +13,31 @@
 // It starts when the first listener connects and shuts down a couple of minutes after
 // the last one leaves, so an idle server runs no ffmpeg at all.
 const { spawn, execFile } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const RING_BYTES = 64 * 1024;        // ~4 s of 128 kbps handed to a new listener so it starts at once
 const IDLE_STOP_MS = 2 * 60 * 1000;  // keep encoding this long after the last listener leaves
 const SLOW_CLIENT_BYTES = 2 * 1024 * 1024; // a listener this far behind is dropped, not buffered forever
 
-function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console.log }) {
+function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console.log, logFile = null, isOwner = () => false }) {
+  // Every listen is remembered (who joined, when, for how long) so she can see whether
+  // anyone besides her is actually tuning in. Lives in the media folder, which deploys
+  // never touch. Bots and link-preview fetchers are not counted.
+  let listens = [];
+  try { if (logFile && fs.existsSync(logFile)) listens = JSON.parse(fs.readFileSync(logFile, 'utf8')) || []; } catch (e) { listens = []; }
+  let saveTimer = null;
+  function saveListens() {
+    if (!logFile) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (listens.length > 5000) listens = listens.slice(-5000);
+      try { fs.writeFileSync(logFile, JSON.stringify(listens)); } catch (e) { log('[radio] could not save listens: ' + e.message); }
+    }, 500);
+  }
+  function looksLikeBot(ua) { return /bot|crawl|spider|slurp|curl|wget|python|go-http|java\/|headless|preview|facebookexternalhit|whatsapp|telegram|discord|slack|twitterbot|ffmpeg|libav|vlc\/|monitor|uptime/i.test(ua || ''); }
+  function deviceOf(ua) { return /iPhone|iPad|Android|Mobile/i.test(ua || '') ? 'phone' : 'computer'; }
+
   const clients = new Set();
   let encoder = null, decoder = null;
   let ring = [], ringLen = 0;
@@ -144,9 +162,17 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     start();
     for (const chunk of ring) res.write(chunk); // instant start from the recent past
     clients.add(res);
-    log('[radio] listener joined (' + clients.size + ')');
+    const ua = String(req.headers['user-agent'] || '');
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const entry = looksLikeBot(ua) ? null : {
+      at: new Date().toISOString(), ip, owner: !!isOwner(req), device: deviceOf(ua),
+      song: current ? current.title : '', seconds: 0,
+    };
+    if (entry) { listens.push(entry); saveListens(); }
+    log('[radio] listener joined (' + clients.size + ')' + (entry ? (entry.owner ? ' [owner]' : '') + ' ' + entry.device : ' [bot, not counted]'));
     const bye = () => {
       if (!clients.delete(res)) return;
+      if (entry) { entry.seconds = Math.round((Date.now() - Date.parse(entry.at)) / 1000); saveListens(); }
       log('[radio] listener left (' + clients.size + ')');
       if (!clients.size) {
         clearTimeout(idleTimer);
@@ -170,7 +196,27 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     };
   }
 
-  return { addListener, nowPlaying, stop, start };
+  // Per-day roll-up for the owner page: listens, distinct people (by address), minutes; owner separated.
+  function summary(days = 14) {
+    const out = {};
+    const since = Date.now() - days * 86400e3;
+    const openSeconds = (e) => e.seconds || (clients.size ? Math.round((Date.now() - Date.parse(e.at)) / 1000) : 0);
+    for (const e of listens) {
+      const t = Date.parse(e.at);
+      if (!(t >= since)) continue;
+      const day = e.at.slice(0, 10);
+      const d = out[day] = out[day] || { day, listens: 0, people: new Set(), minutes: 0, phone: 0, ownerListens: 0, ownerMinutes: 0 };
+      const secs = openSeconds(e);
+      if (e.owner) { d.ownerListens++; d.ownerMinutes += secs / 60; continue; }
+      d.listens++; d.people.add(e.ip); d.minutes += secs / 60; if (e.device === 'phone') d.phone++;
+    }
+    return Object.values(out).sort((a, b) => b.day.localeCompare(a.day)).map((d) => ({
+      day: d.day, listens: d.listens, people: d.people.size, minutes: Math.round(d.minutes), phone: d.phone,
+      ownerListens: d.ownerListens, ownerMinutes: Math.round(d.ownerMinutes),
+    }));
+  }
+
+  return { addListener, nowPlaying, stop, start, summary, listens: () => listens };
 }
 
 module.exports = { createRadio };

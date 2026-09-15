@@ -154,6 +154,8 @@
 </header>
 <div class="sub" id="countLine">Your high-vibration station</div>
 <div class="sub" id="pinLine" style="display:none"></div>
+<div class="sub" id="listenLine" style="display:none"></div>
+<div id="listenTable" style="display:none;overflow-x:auto;max-width:520px;margin:0 auto 10px;padding:0 16px"></div>
 <div class="sub" id="offlineLine" style="display:none"></div>
 <div class="sub" id="updateLine" style="display:none;color:var(--accent);font-weight:700;cursor:pointer">✨ A new version of Calypso Radio is here — tap to update</div>
 <div id="progressWrap"><div id="progressBar"></div></div>
@@ -795,6 +797,34 @@ function showPin(pin) {
     else alert(data.error || 'That one didn’t work — try another?');
   });
 }
+// who is listening to the public station (the live stream logs every listen)
+async function showListens() {
+  let data;
+  try { data = await (await fetch('/api/listens?days=14')).json(); } catch (e) { return; }
+  const days = data.days || [];
+  const week = days.filter((d) => Date.parse(d.day) >= Date.now() - 7 * 86400e3);
+  const sum = (k) => week.reduce((s, d) => s + d[k], 0);
+  const people = new Set(); // distinct listeners this week are not additive per day, so show the max day and total listens
+  const line = $('listenLine');
+  line.style.display = 'block';
+  const live = data.now && data.now.listeners ? ' · <b style="color:var(--accent)">' + data.now.listeners + ' listening right now</b>' : '';
+  if (!sum('listens')) {
+    line.innerHTML = '🎧 Public station, last 7 days: <b>no one but you</b>' + (sum('ownerListens') ? ' (you: ' + sum('ownerListens') + ' listens, ' + sum('ownerMinutes') + ' min)' : '') + live + ' &nbsp;<a href="#" id="listenMore" style="color:var(--accent)">details</a>';
+  } else {
+    line.innerHTML = '🎧 Public station, last 7 days: <b>' + sum('listens') + ' listens</b> by other people, ' + sum('minutes') + ' min' + (sum('ownerListens') ? ' (plus you: ' + sum('ownerListens') + ')' : '') + live + ' &nbsp;<a href="#" id="listenMore" style="color:var(--accent)">details</a>';
+  }
+  const tbl = $('listenTable');
+  tbl.innerHTML = days.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:.85rem;color:var(--dim)"><tr style="color:var(--text)"><th style="text-align:left;padding:4px">Day</th><th style="padding:4px">Listens</th><th style="padding:4px">People</th><th style="padding:4px">Phones</th><th style="padding:4px">Minutes</th><th style="padding:4px">You</th></tr>' +
+      days.map((d) => '<tr><td style="padding:4px">' + d.day + '</td><td style="text-align:center;padding:4px">' + d.listens + '</td><td style="text-align:center;padding:4px">' + d.people + '</td><td style="text-align:center;padding:4px">' + d.phone + '</td><td style="text-align:center;padding:4px">' + d.minutes + '</td><td style="text-align:center;padding:4px">' + (d.ownerListens ? d.ownerListens + ' (' + d.ownerMinutes + ' min)' : '–') + '</td></tr>').join('') +
+      '</table><div style="font-size:.75rem;margin-top:6px">People = different addresses. Bots and link previews are not counted. Counting started 2026-09-14.</div>'
+    : '<div style="font-size:.85rem;color:var(--dim)">No listens recorded yet.</div>';
+  $('listenMore').addEventListener('click', (e) => {
+    e.preventDefault();
+    tbl.style.display = tbl.style.display === 'none' ? 'block' : 'none';
+  });
+}
+showListens();
 let loadedVersion = null;
 fetch('/api/info').then((r) => r.json()).then((info) => {
   if (info.pin) showPin(info.pin);

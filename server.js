@@ -204,6 +204,16 @@ const radio = createRadio({
   listFiles: () => publicFiles().filter((name) => AUDIO_EXT.has(path.extname(name).toLowerCase())),
   ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
   ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
+  logFile: path.join(MEDIA_DIR, '.listens.json'),
+  isOwner: (req) => {
+    const m = (req.headers.cookie || '').match(/(?:^|;\s*)radio=([^;]+)/);
+    return !!(m && m[1] === TOKEN);
+  },
+});
+// Owner only (this route is not in PUBLIC_FILES, so the login gate applies): who listened, per day.
+app.get('/api/listens', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ days: radio.summary(Number(req.query.days) || 14), now: radio.nowPlaying() });
 });
 app.get('/radio.mp3', (req, res) => radio.addListener(req, res));
 app.get('/api/now-playing', (req, res) => {
