@@ -288,7 +288,11 @@ function userPlay() {
 function userPause() {
   wantPlaying = false;
   audio.pause();
-  if (mode === 'live') { audio.removeAttribute('src'); audio.load(); } // drop the connection
+  // Dropping the connection (load()) also cancels the browser's queued 'pause' event,
+  // so the button and lock-screen state are set here rather than in the event handler.
+  $('playBtn').textContent = '▶';
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  if (mode === 'live') { audio.removeAttribute('src'); audio.load(); } // a paused live stream is stale
 }
 $('playBtn').addEventListener('click', () => { if (audio.paused) userPlay(); else userPause(); });
 $('liveBtn').addEventListener('click', () => { wantPlaying = true; tuneIn(); });
