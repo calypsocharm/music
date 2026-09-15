@@ -163,7 +163,7 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     for (const chunk of ring) res.write(chunk); // instant start from the recent past
     clients.add(res);
     const ua = String(req.headers['user-agent'] || '');
-    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const ip = String(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const entry = looksLikeBot(ua) ? null : {
       at: new Date().toISOString(), ip, owner: !!isOwner(req), device: deviceOf(ua),
       song: current ? current.title : '', seconds: 0,
