@@ -82,6 +82,13 @@
   #liveBtn.show { display: inline-block; }
   #status { text-align: center; color: var(--dim); font-size: .74rem; min-height: 1.1em; padding-top: 2px; }
   #volRow { display: flex; align-items: center; gap: 8px; font-size: .85rem; padding: 0 24px; }
+  #volHint { display: none; text-align: center; color: var(--dim); font-size: .74rem; padding-top: 2px; }
+  /* Phones ignore a web page's volume setting (the phone's own buttons are in charge),
+     so the slider did nothing there. Show a hint instead of a control that cannot work. */
+  @media (pointer: coarse) {
+    #volRow { display: none; }
+    #volHint { display: block; }
+  }
   #vol { flex: 1; accent-color: var(--accent); height: 20px; }
   footer { text-align: center; color: var(--dim); font-size: .78rem; padding: 10px 20px 20px; }
   footer a { color: var(--dim); }
@@ -111,6 +118,7 @@
   </div>
   <div id="status"></div>
   <div id="volRow"><span>🔈</span><input type="range" id="vol" min="0" max="100" value="100"><span>🔊</span></div>
+  <div id="volHint">🔊 Use your phone's volume buttons</div>
 </div>
 
 <audio id="audio" preload="none"></audio>
