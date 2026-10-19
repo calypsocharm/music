@@ -131,6 +131,7 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
       setLast(name);
       const duration = await probeDuration(name);
       if (!running) break;
+      if (lastName !== name) continue; // she picked a song while this one was being looked up
       current = { name, title: titleOf(name), startedAt: Date.now(), duration };
       log('[radio] now playing: ' + current.title + ' (' + Math.round(duration) + 's, ' + clients.size + ' listening)');
       await playFile(name);
@@ -156,15 +157,31 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     log('[radio] station off air (no listeners)');
   }
 
-  // `after` = the song she just finished on her own (tapped from the list). If nobody else
-  // is listening, the station carries on from the song after it instead of where it was.
-  function addListener(req, res, after) {
+  // Steering the station from the song list (only when nobody else is listening, so a
+  // stranger's music never jumps): `from` = she tapped a song, the station switches to it
+  // right now; `after` = she just finished a song on her own, the station goes on from
+  // the one after it. Either way there is only ONE place in the list, the station's.
+  const ipOf = new Map(); // listener response -> address
+  function addressOf(req) {
+    return String(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
+  }
+  function steer(name) {
+    setLast(name);
+    if (running && decoder) { // cut what is on air now; the loop moves on from lastName
+      ring = []; ringLen = 0;
+      try { decoder.kill('SIGKILL'); } catch (e) {}
+    }
+  }
+  function addListener(req, res, steerTo = {}) {
     clearTimeout(idleTimer);
-    if (after && !clients.size && listFiles().includes(after)) {
-      setLast(after);
-      if (running && decoder) { // skip what is on air now; the loop moves on to the next song
-        ring = []; ringLen = 0;
-        try { decoder.kill('SIGKILL'); } catch (e) {}
+    const ip = addressOf(req);
+    const alone = [...clients].every((c) => ipOf.get(c) === ip);
+    if (alone && (steerTo.from || steerTo.after)) {
+      const list = listFiles();
+      if (steerTo.from && list.includes(steerTo.from)) {
+        steer(list[(list.indexOf(steerTo.from) - 1 + list.length) % list.length]); // so the next one is hers
+      } else if (steerTo.after && list.includes(steerTo.after)) {
+        steer(steerTo.after);
       }
     }
     res.writeHead(200, {
@@ -179,9 +196,8 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     start();
     for (const chunk of ring) res.write(chunk); // instant start from the recent past
-    clients.add(res);
+    clients.add(res); ipOf.set(res, ip);
     const ua = String(req.headers['user-agent'] || '');
-    const ip = String(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
     const entry = looksLikeBot(ua) ? null : {
       at: new Date().toISOString(), ip, owner: !!isOwner(req), device: deviceOf(ua),
       song: current ? current.title : '', seconds: 0,
@@ -190,6 +206,7 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     log('[radio] listener joined (' + clients.size + ')' + (entry ? (entry.owner ? ' [owner]' : '') + ' ' + entry.device : ' [bot, not counted]'));
     const bye = () => {
       if (!clients.delete(res)) return;
+      ipOf.delete(res);
       if (entry) { entry.seconds = Math.round((Date.now() - Date.parse(entry.at)) / 1000); saveListens(); }
       log('[radio] listener left (' + clients.size + ')');
       if (!clients.size) {

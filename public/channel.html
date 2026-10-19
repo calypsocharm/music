@@ -188,7 +188,7 @@ function row(t, i) {
     // videos open on their own; they are never part of the station
     el.addEventListener('click', () => window.open(t.url, '_blank', 'noopener'));
   } else {
-    el.addEventListener('click', () => playSingle(i));
+    el.addEventListener('click', () => pickSong(i));
   }
   return el;
 }
@@ -228,16 +228,21 @@ function setSession(title) {
 function status(msg) { $('status').textContent = msg || ''; }
 
 // --- the live station ---
-// `after`: the song she just finished, so the station carries on from the next one
-function tuneIn(after) {
+// steer: { from: song she tapped } or { after: song she just finished } - the station
+// itself moves there (when nobody else is listening), so there is one place in the list
+function tuneIn(steer) {
   mode = 'live'; singlePos = -1;
   $('liveBadge').classList.add('on');
   $('liveBtn').classList.remove('show');
   $('seek').disabled = true;
-  markPlaying(now && now.name);
-  $('nowTitle').textContent = now && now.title ? '♪ ' + now.title : 'Tuning in…';
+  const pickedTitle = steer && steer.from && (tracks.find((t) => t.name === steer.from) || {}).title;
+  markPlaying(steer && steer.from ? steer.from : now && now.name);
+  $('nowTitle').textContent = pickedTitle ? '♪ ' + pickedTitle : now && now.title ? '♪ ' + now.title : 'Tuning in…';
   // a fresh connection every time: a paused live stream is stale, so never resume it
-  audio.src = STREAM + '?t=' + Date.now() + (after ? '&after=' + encodeURIComponent(after) : '');
+  let q = '?t=' + Date.now();
+  if (steer && steer.from) q += '&from=' + encodeURIComponent(steer.from);
+  if (steer && steer.after) q += '&after=' + encodeURIComponent(steer.after);
+  audio.src = STREAM + q;
   audio.load();
   const p = audio.play();
   if (p && p.catch) p.catch(() => { status('Tap play to start'); });
@@ -269,7 +274,20 @@ setInterval(() => {
   if (elapsed >= now.duration - 0.5) refreshNow(true);
 }, 1000);
 
-// --- one tapped song (foreground use) ---
+// --- a tapped song ---
+// The station switches to it and carries on down the list from there. If someone else is
+// listening the station cannot jump for them, so she hears just that song on its own.
+function pickSong(i) {
+  const t = tracks[i];
+  if (!t) return;
+  wantPlaying = true; retries = 0; status('');
+  tuneIn({ from: t.name });
+  setTimeout(async () => {
+    if (mode !== 'live') return;
+    await refreshNow(true);
+    if (mode === 'live' && now && now.name && now.name !== t.name) playSingle(i);
+  }, 2500);
+}
 function playSingle(i) {
   if (!tracks.length) return;
   mode = 'single';
@@ -318,7 +336,7 @@ function reconnect(why) {
   reconnectTimer = setTimeout(() => { if (wantPlaying && mode === 'live') tuneIn(); }, wait);
 }
 audio.addEventListener('ended', () => {
-  if (mode === 'single') { wantPlaying = true; tuneIn(tracks[singlePos] && tracks[singlePos].name); } // on with the next song
+  if (mode === 'single') { wantPlaying = true; tuneIn({ after: tracks[singlePos] && tracks[singlePos].name }); } // on with the next song
   else reconnect('ended');                                    // a live stream should never end
 });
 audio.addEventListener('error', () => { if (mode === 'live') reconnect('error'); });

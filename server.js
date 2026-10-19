@@ -216,7 +216,10 @@ app.get('/api/listens', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ days: radio.summary(Number(req.query.days) || 14), now: radio.nowPlaying() });
 });
-app.get('/radio.mp3', (req, res) => radio.addListener(req, res, path.basename(String(req.query.after || ''))));
+app.get('/radio.mp3', (req, res) => radio.addListener(req, res, {
+  from: path.basename(String(req.query.from || '')),
+  after: path.basename(String(req.query.after || '')),
+}));
 app.get('/api/now-playing', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json(radio.nowPlaying());
