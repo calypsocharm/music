@@ -228,7 +228,8 @@ function setSession(title) {
 function status(msg) { $('status').textContent = msg || ''; }
 
 // --- the live station ---
-function tuneIn() {
+// `after`: the song she just finished, so the station carries on from the next one
+function tuneIn(after) {
   mode = 'live'; singlePos = -1;
   $('liveBadge').classList.add('on');
   $('liveBtn').classList.remove('show');
@@ -236,7 +237,7 @@ function tuneIn() {
   markPlaying(now && now.name);
   $('nowTitle').textContent = now && now.title ? '♪ ' + now.title : 'Tuning in…';
   // a fresh connection every time: a paused live stream is stale, so never resume it
-  audio.src = STREAM + '?t=' + Date.now();
+  audio.src = STREAM + '?t=' + Date.now() + (after ? '&after=' + encodeURIComponent(after) : '');
   audio.load();
   const p = audio.play();
   if (p && p.catch) p.catch(() => { status('Tap play to start'); });
@@ -317,7 +318,7 @@ function reconnect(why) {
   reconnectTimer = setTimeout(() => { if (wantPlaying && mode === 'live') tuneIn(); }, wait);
 }
 audio.addEventListener('ended', () => {
-  if (mode === 'single') { wantPlaying = true; tuneIn(); }   // back to the station
+  if (mode === 'single') { wantPlaying = true; tuneIn(tracks[singlePos] && tracks[singlePos].name); } // on with the next song
   else reconnect('ended');                                    // a live stream should never end
 });
 audio.addEventListener('error', () => { if (mode === 'live') reconnect('error'); });

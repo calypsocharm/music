@@ -205,6 +205,7 @@ const radio = createRadio({
   ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
   ffprobe: process.env.FFPROBE_PATH || 'ffprobe',
   logFile: path.join(MEDIA_DIR, '.listens.json'),
+  stateFile: path.join(MEDIA_DIR, '.radio-state.json'),
   isOwner: (req) => {
     const m = (req.headers.cookie || '').match(/(?:^|;\s*)radio=([^;]+)/);
     return !!(m && m[1] === TOKEN);
@@ -215,7 +216,7 @@ app.get('/api/listens', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ days: radio.summary(Number(req.query.days) || 14), now: radio.nowPlaying() });
 });
-app.get('/radio.mp3', (req, res) => radio.addListener(req, res));
+app.get('/radio.mp3', (req, res) => radio.addListener(req, res, path.basename(String(req.query.after || ''))));
 app.get('/api/now-playing', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json(radio.nowPlaying());

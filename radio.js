@@ -20,7 +20,16 @@ const RING_BYTES = 64 * 1024;        // ~4 s of 128 kbps handed to a new listene
 const IDLE_STOP_MS = 2 * 60 * 1000;  // keep encoding this long after the last listener leaves
 const SLOW_CLIENT_BYTES = 2 * 1024 * 1024; // a listener this far behind is dropped, not buffered forever
 
-function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console.log, logFile = null, isOwner = () => false }) {
+function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe', log = console.log, logFile = null, stateFile = null, isOwner = () => false }) {
+  // Where the station is in the list, remembered across restarts (2026-10-19): it used to
+  // start at song 1 every time it came back on air, so the first song played over and over.
+  let lastName = '';
+  try { if (stateFile && fs.existsSync(stateFile)) lastName = String(JSON.parse(fs.readFileSync(stateFile, 'utf8')).last || ''); } catch (e) {}
+  function setLast(name) {
+    lastName = name;
+    if (stateFile) { try { fs.writeFileSync(stateFile, JSON.stringify({ last: name })); } catch (e) {} }
+  }
+
   // Every listen is remembered (who joined, when, for how long) so she can see whether
   // anyone besides her is actually tuning in. Lives in the media folder, which deploys
   // never touch. Bots and link-preview fetchers are not counted.
@@ -113,13 +122,13 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     });
   }
 
+  // Always the song after the last one played (or after the one she picked), never back to the top.
   async function loop() {
-    let idx = 0;
     while (running) {
       const list = listFiles();
       if (!list.length) { await new Promise((r) => setTimeout(r, 5000)); continue; }
-      if (idx >= list.length) idx = 0;
-      const name = list[idx++];
+      const name = list[(list.indexOf(lastName) + 1) % list.length];
+      setLast(name);
       const duration = await probeDuration(name);
       if (!running) break;
       current = { name, title: titleOf(name), startedAt: Date.now(), duration };
@@ -147,8 +156,17 @@ function createRadio({ mediaDir, listFiles, ffmpeg = 'ffmpeg', ffprobe = 'ffprob
     log('[radio] station off air (no listeners)');
   }
 
-  function addListener(req, res) {
+  // `after` = the song she just finished on her own (tapped from the list). If nobody else
+  // is listening, the station carries on from the song after it instead of where it was.
+  function addListener(req, res, after) {
     clearTimeout(idleTimer);
+    if (after && !clients.size && listFiles().includes(after)) {
+      setLast(after);
+      if (running && decoder) { // skip what is on air now; the loop moves on to the next song
+        ring = []; ringLen = 0;
+        try { decoder.kill('SIGKILL'); } catch (e) {}
+      }
+    }
     res.writeHead(200, {
       'Content-Type': 'audio/mpeg',
       'Cache-Control': 'no-cache, no-store',
