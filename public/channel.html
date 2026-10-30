@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1a1025">
-<meta name="description" content="Positivity & abundance music from Calypso — listen free.">
+<meta name="description" content="Positivity & abundance music from Calypso, listen free.">
 <link rel="manifest" href="/manifest-channel.webmanifest">
 <link rel="icon" type="image/png" href="/icon-512.png">
 <link rel="apple-touch-icon" href="/icon-512.png">
-<title>Calypso Radio — free channel</title>
+<title>Calypso Radio, free channel</title>
 <style>
   :root {
     --bg: #1a1025; --bg2: #241536; --card: #2d1b44; --card-hi: #3a2458;
@@ -98,7 +98,7 @@
 <div class="hero">
   <div class="star">✦</div>
   <h1>Calypso Radio</h1>
-  <p class="tagline">Positivity &amp; abundance — listen free 🌻</p>
+  <p class="tagline">Positivity &amp; abundance, listen free 🌻</p>
   <button id="installBtn">📲 Get the app</button>
   <div class="install-hint" id="installHint"></div>
 </div>
@@ -199,7 +199,7 @@ async function load() {
   const list = $('list');
   list.innerHTML = '';
   if (!all.length) {
-    list.innerHTML = '<div id="empty">🎧<br>Nothing shared yet — check back soon!</div>';
+    list.innerHTML = '<div id="empty">🎧<br>Nothing shared yet. Check back soon!</div>';
     return;
   }
   tracks.forEach((t, i) => list.appendChild(row(t, i)));
